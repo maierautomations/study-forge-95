@@ -1,5 +1,6 @@
-import { supabase } from '@/integrations/supabase/client'
+import { supabase } from '@/lib/supabase/client'
 import { Database } from '@/integrations/supabase/types'
+import { uploadToStorage, getSignedUrl, deleteFromStorage } from '@/lib/storage'
 
 export type Document = Database['public']['Tables']['documents']['Row']
 export type DocumentInsert = Database['public']['Tables']['documents']['Insert']
@@ -43,40 +44,73 @@ export const documentApi = {
     return data
   },
 
-  async delete(id: string) {
-    const { error } = await supabase
-      .from('documents')
-      .delete()
-      .eq('id', id)
-    
-    if (error) throw error
-  },
-
   async upload(file: File) {
     const user = await supabase.auth.getUser()
     if (!user.data.user) throw new Error('Not authenticated')
 
-    const fileExt = file.name.split('.').pop()
-    const fileName = `${Math.random().toString(36).substring(2)}.${fileExt}`
-    const filePath = `${user.data.user.id}/${fileName}`
+    try {
+      // Upload file to storage
+      const uploadResult = await uploadToStorage(file, 'documents')
+      
+      // Create document record with storage information
+      const documentData: DocumentInsert = {
+        user_id: user.data.user.id,
+        title: file.name.replace(/\.[^/.]+$/, ''), // Remove file extension
+        filename: file.name,
+        file_size: file.size,
+        file_path: uploadResult.fullPath,
+        status: 'uploaded'
+      }
 
-    const { error: uploadError } = await supabase.storage
-      .from('documents')
-      .upload(filePath, file)
-
-    if (uploadError) throw uploadError
-
-    // Create document record
-    const documentData: DocumentInsert = {
-      user_id: user.data.user.id,
-      title: file.name.replace(/\.[^/.]+$/, ''),
-      filename: file.name,
-      file_size: file.size,
-      file_path: filePath,
-      status: 'uploaded'
+      const document = await this.create(documentData)
+      
+      return {
+        document,
+        uploadResult
+      }
+    } catch (error) {
+      console.error('Document upload error:', error)
+      throw error
     }
+  },
 
-    return this.create(documentData)
+  async delete(id: string) {
+    // First get the document to get the file path
+    const document = await this.get(id)
+    
+    // Delete from database
+    const { error: dbError } = await supabase
+      .from('documents')
+      .delete()
+      .eq('id', id)
+    
+    if (dbError) throw dbError
+
+    // Delete from storage
+    try {
+      await deleteFromStorage(document.file_path, 'documents')
+    } catch (storageError) {
+      console.warn('Failed to delete file from storage:', storageError)
+      // Don't throw here as database deletion was successful
+    }
+  },
+
+  async getDownloadUrl(id: string) {
+    const document = await this.get(id)
+    const signedUrl = await getSignedUrl(document.file_path, 'documents', 3600) // 60 minutes
+    return signedUrl
+  },
+
+  async rename(id: string, newTitle: string) {
+    const { data, error } = await supabase
+      .from('documents')
+      .update({ title: newTitle })
+      .eq('id', id)
+      .select()
+      .single()
+    
+    if (error) throw error
+    return data
   }
 }
 
