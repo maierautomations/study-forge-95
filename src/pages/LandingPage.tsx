@@ -64,10 +64,10 @@ export default function LandingPage() {
             </div>
             
             <div className="flex items-center space-x-4">
-              <Link to="/dashboard">
-                <Button variant="ghost">Dashboard</Button>
+              <Link to="/auth/signin">
+                <Button variant="ghost">Sign In</Button>
               </Link>
-              <Link to="/dashboard">
+              <Link to="/auth/signin">
                 <Button className="button-glow">Get Started</Button>
               </Link>
             </div>
@@ -93,7 +93,7 @@ export default function LandingPage() {
             </p>
             
             <div className="mt-10 flex flex-col sm:flex-row gap-4 justify-center">
-              <Link to="/dashboard">
+              <Link to="/auth/signin">
                 <Button size="lg" className="button-glow text-lg px-8 py-6 w-full sm:w-auto">
                   Start Learning Now
                   <ArrowRight className="ml-2 w-5 h-5" />
@@ -184,7 +184,7 @@ export default function LandingPage() {
           <p className="text-xl text-white/90 mb-8 leading-relaxed">
             Join StudyRAG today and experience the future of intelligent learning.
           </p>
-          <Link to="/dashboard">
+          <Link to="/auth/signin">
             <Button size="lg" variant="secondary" className="text-lg px-8 py-6 bg-white/90 text-primary hover:bg-white">
               Get Started Free
               <ArrowRight className="ml-2 w-5 h-5" />

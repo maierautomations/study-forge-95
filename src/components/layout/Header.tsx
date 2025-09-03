@@ -1,4 +1,4 @@
-import { Bell, Search, User } from "lucide-react"
+import { Bell, Search, User, LogOut } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
@@ -8,8 +8,13 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { useAuth } from "@/hooks/useAuth"
+import { useProfile } from "@/hooks/useQueries"
 
 export function Header() {
+  const { user, signOut } = useAuth()
+  const { data: profile } = useProfile()
+
   return (
     <header className="h-16 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
       <div className="flex h-full items-center justify-between px-6">
@@ -39,15 +44,20 @@ export function Header() {
                 <div className="w-6 h-6 bg-gradient-primary rounded-full flex items-center justify-center">
                   <User className="w-4 h-4 text-primary-foreground" />
                 </div>
-                <span className="hidden md:inline">Demo User</span>
+                <span className="hidden md:inline">{profile?.display_name || user?.email}</span>
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-56">
+              <div className="px-2 py-1.5 text-sm text-muted-foreground">
+                {profile?.display_name || user?.email}
+              </div>
+              <DropdownMenuSeparator />
               <DropdownMenuItem>Profile</DropdownMenuItem>
               <DropdownMenuItem>Settings</DropdownMenuItem>
               <DropdownMenuItem>Billing</DropdownMenuItem>
               <DropdownMenuSeparator />
-              <DropdownMenuItem className="text-destructive">
+              <DropdownMenuItem onClick={signOut} className="text-destructive">
+                <LogOut className="w-4 h-4 mr-2" />
                 Sign out
               </DropdownMenuItem>
             </DropdownMenuContent>

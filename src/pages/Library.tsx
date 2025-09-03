@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { FileText, Filter, Grid, List, Plus, Search, Upload } from "lucide-react"
+import { FileText, Filter, Grid, List, Plus, Search, Upload, Trash2, MessageSquare, Brain } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -11,84 +11,49 @@ import {
   DropdownMenuTrigger 
 } from "@/components/ui/dropdown-menu"
 import { Link } from "react-router-dom"
+import { useDocuments } from "@/hooks/useQueries"
+import { documentApi } from "@/lib/api"
+import { useToast } from "@/hooks/use-toast"
+import { useMutation, useQueryClient } from "@tanstack/react-query"
 
-const documents = [
-  {
-    id: 1,
-    title: "Advanced Chemistry Textbook",
-    size: "15.2 MB",
-    pages: 450,
-    uploadDate: "2024-01-15",
-    type: "pdf",
-    tags: ["chemistry", "textbook", "advanced"],
-    chatCount: 12,
-    quizCount: 3
-  },
-  {
-    id: 2,
-    title: "Machine Learning Fundamentals",
-    size: "8.7 MB", 
-    pages: 320,
-    uploadDate: "2024-01-12",
-    type: "pdf",
-    tags: ["ml", "ai", "fundamentals"],
-    chatCount: 8,
-    quizCount: 2
-  },
-  {
-    id: 3,
-    title: "History Research Notes",
-    size: "2.1 MB",
-    pages: 85,
-    uploadDate: "2024-01-10",
-    type: "doc",
-    tags: ["history", "research", "notes"],
-    chatCount: 5,
-    quizCount: 1
-  },
-  {
-    id: 4,
-    title: "Biology Lab Manual",
-    size: "22.4 MB",
-    pages: 280,
-    uploadDate: "2024-01-08",
-    type: "pdf", 
-    tags: ["biology", "lab", "manual"],
-    chatCount: 15,
-    quizCount: 4
-  },
-  {
-    id: 5,
-    title: "Economics Study Guide",
-    size: "5.3 MB",
-    pages: 120,
-    uploadDate: "2024-01-05",
-    type: "pdf",
-    tags: ["economics", "study guide"],
-    chatCount: 7,
-    quizCount: 2
-  },
-  {
-    id: 6,
-    title: "Programming Concepts",
-    size: "12.8 MB",
-    pages: 380,
-    uploadDate: "2024-01-03",
-    type: "pdf",
-    tags: ["programming", "concepts", "cs"],
-    chatCount: 20,
-    quizCount: 5
-  }
-]
+function formatFileSize(bytes: number) {
+  if (bytes === 0) return '0 Bytes'
+  const k = 1024
+  const sizes = ['Bytes', 'KB', 'MB', 'GB']
+  const i = Math.floor(Math.log(bytes) / Math.log(k))
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i]
+}
 
 export default function Library() {
   const [searchQuery, setSearchQuery] = useState("")
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid")
   const [sortBy, setSortBy] = useState("recent")
+  
+  const { data: documents = [], isLoading, error } = useDocuments()
+  const { toast } = useToast()
+  const queryClient = useQueryClient()
+
+  const deleteDocument = useMutation({
+    mutationFn: documentApi.delete,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['documents'] })
+      toast({
+        title: "Document deleted",
+        description: "The document has been removed from your library."
+      })
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Failed to delete document",
+        description: error.message,
+        variant: "destructive"
+      })
+    }
+  })
 
   const filteredDocuments = documents.filter(doc =>
     doc.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    doc.tags.some(tag => tag.toLowerCase().includes(searchQuery.toLowerCase()))
+    doc.filename.toLowerCase().includes(searchQuery.toLowerCase())
   )
 
   const sortedDocuments = [...filteredDocuments].sort((a, b) => {
@@ -96,12 +61,28 @@ export default function Library() {
       case "name":
         return a.title.localeCompare(b.title)
       case "size":
-        return parseFloat(b.size) - parseFloat(a.size)
+        return b.file_size - a.file_size
       case "recent":
       default:
-        return new Date(b.uploadDate).getTime() - new Date(a.uploadDate).getTime()
+        return new Date(b.upload_date).getTime() - new Date(a.upload_date).getTime()
     }
   })
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="text-center py-12">
+        <p className="text-destructive">Failed to load documents. Please try again.</p>
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-6">
@@ -197,43 +178,35 @@ export default function Library() {
           <CardContent className="p-4">
             <div className="flex items-center gap-3">
               <Upload className="w-8 h-8 text-accent" />
-              <div>
-                <p className="text-2xl font-bold">
-                  {documents.reduce((acc, doc) => acc + parseFloat(doc.size), 0).toFixed(1)} MB
-                </p>
-                <p className="text-sm text-muted-foreground">Total Size</p>
-              </div>
+                <div>
+                  <p className="text-2xl font-bold">
+                    {formatFileSize(documents.reduce((acc, doc) => acc + doc.file_size, 0))}
+                  </p>
+                  <p className="text-sm text-muted-foreground">Total Size</p>
+                </div>
             </div>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-4">
-            <div className="flex items-center gap-3">
-              <div className="w-8 h-8 bg-success/10 rounded-lg flex items-center justify-center">
-                <span className="text-success font-bold text-lg">?</span>
+              <div className="flex items-center gap-3">
+                <MessageSquare className="w-8 h-8 text-success" />
+                <div>
+                  <p className="text-2xl font-bold">-</p>
+                  <p className="text-sm text-muted-foreground">Chat Sessions</p>
+                </div>
               </div>
-              <div>
-                <p className="text-2xl font-bold">
-                  {documents.reduce((acc, doc) => acc + doc.chatCount, 0)}
-                </p>
-                <p className="text-sm text-muted-foreground">Chat Sessions</p>
-              </div>
-            </div>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-4">
-            <div className="flex items-center gap-3">
-              <div className="w-8 h-8 bg-warning/10 rounded-lg flex items-center justify-center">
-                <span className="text-warning font-bold text-lg">Q</span>
+              <div className="flex items-center gap-3">
+                <Brain className="w-8 h-8 text-warning" />
+                <div>
+                  <p className="text-2xl font-bold">-</p>
+                  <p className="text-sm text-muted-foreground">Quizzes Created</p>
+                </div>
               </div>
-              <div>
-                <p className="text-2xl font-bold">
-                  {documents.reduce((acc, doc) => acc + doc.quizCount, 0)}
-                </p>
-                <p className="text-sm text-muted-foreground">Quizzes Created</p>
-              </div>
-            </div>
           </CardContent>
         </Card>
       </div>
@@ -271,34 +244,51 @@ export default function Library() {
                   <div className="min-w-0 flex-1">
                     <CardTitle className="text-lg truncate">{doc.title}</CardTitle>
                     <CardDescription className="mt-1">
-                      {doc.size} • {doc.pages} pages • {new Date(doc.uploadDate).toLocaleDateString()}
+                      {formatFileSize(doc.file_size)} • {new Date(doc.upload_date).toLocaleDateString()}
                     </CardDescription>
                   </div>
+                  {viewMode === "grid" && (
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="ghost" size="sm">
+                          <span className="sr-only">More options</span>
+                          <div className="w-4 h-4 flex flex-col space-y-1">
+                            <div className="w-1 h-1 bg-current rounded-full"></div>
+                            <div className="w-1 h-1 bg-current rounded-full"></div>
+                            <div className="w-1 h-1 bg-current rounded-full"></div>
+                          </div>
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem 
+                          onClick={() => deleteDocument.mutate(doc.id)}
+                          className="text-destructive"
+                        >
+                          <Trash2 className="w-4 h-4 mr-2" />
+                          Delete
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  )}
                 </div>
               </CardHeader>
               <CardContent className={viewMode === "list" ? "pt-2" : ""}>
                 <div className="space-y-3">
-                  <div className="flex flex-wrap gap-1">
-                    {doc.tags.map((tag) => (
-                      <Badge key={tag} variant="secondary" className="text-xs">
-                        {tag}
-                      </Badge>
-                    ))}
-                  </div>
-                  
                   <div className="flex justify-between text-sm text-muted-foreground">
-                    <span>{doc.chatCount} chats</span>
-                    <span>{doc.quizCount} quizzes</span>
+                    <span className="capitalize">{doc.status}</span>
+                    <span>{doc.filename}</span>
                   </div>
                   
                   <div className="flex gap-2">
                     <Link to={`/chat/${doc.id}`} className="flex-1">
                       <Button variant="outline" size="sm" className="w-full">
+                        <MessageSquare className="w-4 h-4 mr-2" />
                         Chat
                       </Button>
                     </Link>
                     <Link to={`/quiz/${doc.id}/build`} className="flex-1">
                       <Button variant="outline" size="sm" className="w-full">
+                        <Brain className="w-4 h-4 mr-2" />
                         Quiz
                       </Button>
                     </Link>
