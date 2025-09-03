@@ -2,12 +2,11 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Definition of the design system. All colors, gradients, fonts, etc should be defined here. 
-All colors MUST be HSL.
-*/
+/* StudyRAG Design System - Modern learning platform with purple/blue theme */
 
 @layer base {
   :root {
+    /* Base colors - Clean whites and grays */
     --background: 0 0% 100%;
     --foreground: 222.2 84% 4.9%;
 
@@ -17,26 +16,54 @@ All colors MUST be HSL.
     --popover: 0 0% 100%;
     --popover-foreground: 222.2 84% 4.9%;
 
-    --primary: 222.2 47.4% 11.2%;
-    --primary-foreground: 210 40% 98%;
+    /* Primary - Deep purple for brand identity */
+    --primary: 263 85% 57%;
+    --primary-foreground: 0 0% 98%;
+    --primary-glow: 263 85% 67%;
 
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
+    /* Secondary - Soft purple-gray */
+    --secondary: 260 15% 95%;
+    --secondary-foreground: 263 25% 25%;
 
-    --muted: 210 40% 96.1%;
+    /* Muted - Subtle backgrounds */
+    --muted: 260 15% 96%;
     --muted-foreground: 215.4 16.3% 46.9%;
 
-    --accent: 210 40% 96.1%;
-    --accent-foreground: 222.2 47.4% 11.2%;
+    /* Accent - Bright blue for highlights */
+    --accent: 217 100% 60%;
+    --accent-foreground: 0 0% 98%;
+    --accent-glow: 217 100% 70%;
 
+    /* System colors */
     --destructive: 0 84.2% 60.2%;
     --destructive-foreground: 210 40% 98%;
+    --success: 142 76% 36%;
+    --success-foreground: 355.7 100% 97.3%;
+    --warning: 32 95% 44%;
+    --warning-foreground: 355.7 100% 97.3%;
 
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 222.2 84% 4.9%;
+    /* Borders and inputs */
+    --border: 260 15% 90%;
+    --input: 260 15% 90%;
+    --ring: 263 85% 57%;
 
-    --radius: 0.5rem;
+    /* StudyRAG specific design tokens */
+    --radius: 0.75rem;
+    
+    /* Gradients for modern look */
+    --gradient-primary: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--primary-glow)));
+    --gradient-accent: linear-gradient(135deg, hsl(var(--accent)), hsl(var(--accent-glow)));
+    --gradient-subtle: linear-gradient(180deg, hsl(var(--background)), hsl(var(--muted)));
+    --gradient-hero: linear-gradient(135deg, hsl(263 85% 57%), hsl(217 100% 60%));
+    
+    /* Shadows with brand colors */
+    --shadow-primary: 0 10px 40px -15px hsl(var(--primary) / 0.4);
+    --shadow-accent: 0 10px 40px -15px hsl(var(--accent) / 0.3);
+    --shadow-card: 0 4px 20px -4px hsl(222.2 84% 4.9% / 0.1);
+    
+    /* Animation and transitions */
+    --transition-smooth: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    --transition-bounce: all 0.4s cubic-bezier(0.68, -0.55, 0.265, 1.55);
 
     --sidebar-background: 0 0% 98%;
 
@@ -56,33 +83,57 @@ All colors MUST be HSL.
   }
 
   .dark {
-    --background: 222.2 84% 4.9%;
-    --foreground: 210 40% 98%;
+    /* Dark mode - Deep purple background with light text */
+    --background: 263 50% 8%;
+    --foreground: 0 0% 95%;
 
-    --card: 222.2 84% 4.9%;
-    --card-foreground: 210 40% 98%;
+    --card: 263 40% 10%;
+    --card-foreground: 0 0% 95%;
 
-    --popover: 222.2 84% 4.9%;
-    --popover-foreground: 210 40% 98%;
+    --popover: 263 40% 10%;
+    --popover-foreground: 0 0% 95%;
 
-    --primary: 210 40% 98%;
-    --primary-foreground: 222.2 47.4% 11.2%;
+    /* Primary stays bright in dark mode */
+    --primary: 263 85% 67%;
+    --primary-foreground: 263 50% 8%;
+    --primary-glow: 263 85% 77%;
 
-    --secondary: 217.2 32.6% 17.5%;
-    --secondary-foreground: 210 40% 98%;
+    /* Secondary - Dark purple-gray */
+    --secondary: 263 30% 15%;
+    --secondary-foreground: 0 0% 90%;
 
-    --muted: 217.2 32.6% 17.5%;
+    /* Muted backgrounds */
+    --muted: 263 30% 12%;
     --muted-foreground: 215 20.2% 65.1%;
 
-    --accent: 217.2 32.6% 17.5%;
-    --accent-foreground: 210 40% 98%;
+    /* Accent - Bright blue for dark mode */
+    --accent: 217 100% 70%;
+    --accent-foreground: 263 50% 8%;
+    --accent-glow: 217 100% 80%;
 
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
+    /* System colors for dark mode */
+    --destructive: 0 62.8% 50%;
+    --destructive-foreground: 0 0% 98%;
+    --success: 142 76% 46%;
+    --success-foreground: 355.7 100% 97.3%;
+    --warning: 32 95% 54%;
+    --warning-foreground: 355.7 100% 97.3%;
 
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
-    --ring: 212.7 26.8% 83.9%;
+    /* Borders and inputs */
+    --border: 263 30% 18%;
+    --input: 263 30% 18%;
+    --ring: 263 85% 67%;
+    
+    /* Dark mode gradients */
+    --gradient-primary: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--primary-glow)));
+    --gradient-accent: linear-gradient(135deg, hsl(var(--accent)), hsl(var(--accent-glow)));
+    --gradient-subtle: linear-gradient(180deg, hsl(var(--background)), hsl(var(--muted)));
+    --gradient-hero: linear-gradient(135deg, hsl(263 85% 67%), hsl(217 100% 70%));
+    
+    /* Dark mode shadows */
+    --shadow-primary: 0 10px 40px -15px hsl(var(--primary) / 0.5);
+    --shadow-accent: 0 10px 40px -15px hsl(var(--accent) / 0.4);
+    --shadow-card: 0 4px 20px -4px hsl(0 0% 0% / 0.3);
     --sidebar-background: 240 5.9% 10%;
     --sidebar-foreground: 240 4.8% 95.9%;
     --sidebar-primary: 224.3 76.3% 48%;
@@ -100,6 +151,79 @@ All colors MUST be HSL.
   }
 
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-foreground font-sans antialiased;
+  }
+
+  /* Custom scrollbar */
+  ::-webkit-scrollbar {
+    width: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-muted;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-border rounded-full;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-muted-foreground/50;
+  }
+}
+
+@layer components {
+  /* Hero section styles */
+  .hero-gradient {
+    background: var(--gradient-hero);
+    background-size: 200% 200%;
+    animation: gradient-shift 8s ease infinite;
+  }
+
+  .card-hover {
+    transition: var(--transition-smooth);
+    @apply hover:shadow-lg hover:-translate-y-1;
+  }
+
+  .button-glow {
+    box-shadow: var(--shadow-primary);
+    transition: var(--transition-smooth);
+  }
+
+  .button-glow:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-primary), 0 6px 20px -6px hsl(var(--primary) / 0.5);
+  }
+
+  /* Animations */
+  @keyframes gradient-shift {
+    0%, 100% { background-position: 0% 50%; }
+    50% { background-position: 100% 50%; }
+  }
+
+  @keyframes fade-in-up {
+    from {
+      opacity: 0;
+      transform: translateY(20px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  .animate-fade-in-up {
+    animation: fade-in-up 0.6s ease-out;
+  }
+
+  /* Glass morphism effect */
+  .glass {
+    backdrop-filter: blur(16px) saturate(180%);
+    @apply bg-white/10 border border-white/20;
+  }
+
+  .glass-dark {
+    backdrop-filter: blur(16px) saturate(180%);
+    @apply bg-black/10 border border-white/10;
   }
 }
