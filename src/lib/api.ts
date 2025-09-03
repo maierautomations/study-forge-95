@@ -237,6 +237,39 @@ export const quizApi = {
   }
 }
 
+// RAG API
+export const ragApi = {
+  async *query(documentId: string, question: string): AsyncGenerator<{
+    type: 'chunk' | 'sources' | 'done'
+    content?: string
+    sources?: Array<{ page: number; section: string; text: string; confidence: number }>
+  }> {
+    // Mock streaming implementation
+    const chunks = [
+      "This is a comprehensive analysis of your document...",
+      " The key findings indicate several important patterns...",
+      " Based on the evidence, we can conclude that..."
+    ];
+    
+    const sources = [
+      { page: 1, section: "Introduction", text: "Lorem ipsum dolor sit amet, consectetur adipiscing elit...", confidence: 0.95 },
+      { page: 3, section: "Methodology", text: "Sed do eiusmod tempor incididunt ut labore et dolore magna...", confidence: 0.87 }
+    ];
+    
+    // Simulate streaming chunks
+    for (const chunk of chunks) {
+      await new Promise(resolve => setTimeout(resolve, 800));
+      yield { type: 'chunk', content: chunk };
+    }
+    
+    // Send sources
+    yield { type: 'sources', sources };
+    
+    // Signal completion
+    yield { type: 'done' };
+  }
+}
+
 // Profile API
 export const profileApi = {
   async get() {

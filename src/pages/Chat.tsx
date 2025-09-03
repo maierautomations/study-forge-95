@@ -1,335 +1,176 @@
-import { useState, useRef, useEffect } from "react"
-import { Send, FileText, Quote, Copy, BookOpen, MessageSquare, Bot, User } from "lucide-react"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
-import { ScrollArea } from "@/components/ui/scroll-area"
-import { Avatar, AvatarFallback } from "@/components/ui/avatar"
-import { Textarea } from "@/components/ui/textarea"
+import { useState, useEffect, useRef } from 'react'
+import { useParams } from 'react-router-dom'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { FileText } from 'lucide-react'
+import { useDocument, useDocuments } from '@/hooks/useQueries'
+import { ragApi } from '@/lib/api'
+import { MessageList, Message, Source } from '@/components/chat/MessageList'
+import { ChatInput } from '@/components/chat/ChatInput'
+import { ContextPanel } from '@/components/chat/ContextPanel'
+import { useToast } from '@/hooks/use-toast'
 
-interface Message {
-  id: string
-  type: 'user' | 'assistant'
-  content: string
-  timestamp: Date
-  sources?: Source[]
-}
-
-interface Source {
-  page: number
-  section: string
-  text: string
-  confidence: number
-}
-
-const mockDocuments = [
-  { id: 1, title: "Advanced Chemistry Textbook", pages: 450 },
-  { id: 2, title: "Machine Learning Fundamentals", pages: 320 },
-  { id: 3, title: "Biology Lab Manual", pages: 280 },
-]
-
-const mockMessages: Message[] = [
-  {
-    id: '1',
-    type: 'assistant',
-    content: 'Hello! I\'m your AI study assistant. I can help you understand your documents, answer questions, and provide detailed explanations. Which document would you like to discuss today?',
-    timestamp: new Date(Date.now() - 30000),
-  }
-]
-
-export default function Chat() {
-  const [messages, setMessages] = useState<Message[]>(mockMessages)
-  const [input, setInput] = useState("")
-  const [selectedDocument, setSelectedDocument] = useState<number | null>(null)
+const Chat = () => {
+  const { docId } = useParams<{ docId: string }>()
+  const [messages, setMessages] = useState<Message[]>([])
+  const [contextSources, setContextSources] = useState<Source[]>([])
   const [isLoading, setIsLoading] = useState(false)
+  const [selectedDocument, setSelectedDocument] = useState<string | null>(docId || null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const { toast } = useToast()
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
-  }
+  const { data: documents } = useDocuments()
+  const { data: document } = useDocument(selectedDocument || '')
 
   useEffect(() => {
     scrollToBottom()
   }, [messages])
 
-  const handleSend = async () => {
-    if (!input.trim() || !selectedDocument) return
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }
+
+  const handleSend = async (content: string) => {
+    if (!selectedDocument) {
+      toast({
+        title: 'No document selected',
+        description: 'Please select a document first',
+        variant: 'destructive'
+      })
+      return
+    }
 
     const userMessage: Message = {
       id: Date.now().toString(),
-      type: 'user',
-      content: input,
-      timestamp: new Date(),
+      role: 'user',
+      content,
+      timestamp: new Date()
     }
 
     setMessages(prev => [...prev, userMessage])
-    setInput("")
     setIsLoading(true)
 
-    // Simulate AI response
-    setTimeout(() => {
-      const aiMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        type: 'assistant',
-        content: `Based on your question about "${input}", I found relevant information in the document. Here's a comprehensive explanation:
+    // Start AI response
+    const aiMessage: Message = {
+      id: (Date.now() + 1).toString(),
+      role: 'assistant',
+      content: '',
+      timestamp: new Date(),
+      sources: []
+    }
 
-The concept you're asking about is covered in detail in the selected document. The key points include:
+    setMessages(prev => [...prev, aiMessage])
 
-1. **Primary Definition**: The fundamental principle behind this concept involves understanding the core mechanisms that drive the process.
-
-2. **Applications**: This concept has several practical applications in real-world scenarios, particularly in the context of the subject matter.
-
-3. **Important Considerations**: When applying this concept, it's crucial to consider the underlying assumptions and limitations.
-
-Would you like me to elaborate on any of these points or explain specific aspects in more detail?`,
-        timestamp: new Date(),
-        sources: [
-          {
-            page: 42,
-            section: "Chapter 3: Core Concepts",
-            text: "The fundamental principle behind this concept involves understanding the core mechanisms...",
-            confidence: 0.95
-          },
-          {
-            page: 78,
-            section: "Chapter 5: Applications",
-            text: "This concept has several practical applications in real-world scenarios...",
-            confidence: 0.87
-          }
-        ]
+    try {
+      // Stream response
+      for await (const chunk of ragApi.query(selectedDocument, content)) {
+        if (chunk.type === 'chunk' && chunk.content) {
+          setMessages(prev => prev.map(msg => 
+            msg.id === aiMessage.id 
+              ? { ...msg, content: msg.content + chunk.content }
+              : msg
+          ))
+        } else if (chunk.type === 'sources' && chunk.sources) {
+          setMessages(prev => prev.map(msg => 
+            msg.id === aiMessage.id 
+              ? { ...msg, sources: chunk.sources }
+              : msg
+          ))
+          setContextSources(chunk.sources)
+        }
       }
-
-      setMessages(prev => [...prev, aiMessage])
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: 'Failed to get response',
+        variant: 'destructive'
+      })
+    } finally {
       setIsLoading(false)
-    }, 2000)
+    }
   }
 
-  const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text)
+  const handleSourceClick = (source: Source) => {
+    toast({
+      title: `Page ${source.page}`,
+      description: `${source.section}: ${source.text.slice(0, 100)}...`
+    })
   }
 
   return (
-    <div className="h-[calc(100vh-8rem)] flex gap-6">
+    <div className="flex h-full">
       {/* Document Selection Sidebar */}
-      <div className="w-80 space-y-4">
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <BookOpen className="w-5 h-5" />
-              Select Document
-            </CardTitle>
-            <CardDescription>
-              Choose a document to chat with
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {mockDocuments.map((doc) => (
-              <div
-                key={doc.id}
-                className={`p-3 rounded-lg border cursor-pointer transition-colors ${
-                  selectedDocument === doc.id
-                    ? 'border-primary bg-primary/5'
-                    : 'border-border hover:border-primary/50'
-                }`}
-                onClick={() => setSelectedDocument(doc.id)}
-              >
-                <div className="flex items-start gap-3">
-                  <div className="w-10 h-10 bg-primary/10 rounded-lg flex items-center justify-center flex-shrink-0">
-                    <FileText className="w-5 h-5 text-primary" />
-                  </div>
-                  <div className="min-w-0">
-                    <p className="font-medium text-sm leading-tight">{doc.title}</p>
-                    <p className="text-xs text-muted-foreground mt-1">
-                      {doc.pages} pages
-                    </p>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
-
-        {selectedDocument && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-sm">Quick Actions</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              <Button variant="outline" size="sm" className="w-full justify-start">
-                <MessageSquare className="w-4 h-4 mr-2" />
-                Summarize Document
-              </Button>
-              <Button variant="outline" size="sm" className="w-full justify-start">
-                <FileText className="w-4 h-4 mr-2" />
-                Key Concepts
-              </Button>
-              <Button variant="outline" size="sm" className="w-full justify-start">
-                <Quote className="w-4 h-4 mr-2" />
-                Important Quotes
-              </Button>
-            </CardContent>
-          </Card>
-        )}
+      <div className="w-64 border-r bg-muted/20 p-4">
+        <h3 className="font-semibold mb-4">Select Document</h3>
+        <div className="space-y-2">
+          {documents?.map((doc) => (
+            <Card
+              key={doc.id}
+              className={`cursor-pointer transition-colors ${
+                selectedDocument === doc.id ? 'ring-2 ring-primary' : ''
+              }`}
+              onClick={() => setSelectedDocument(doc.id)}
+            >
+              <CardContent className="p-3">
+                <h4 className="text-sm font-medium line-clamp-2">{doc.title}</h4>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {(doc.file_size / 1024).toFixed(1)} KB
+                </p>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
       </div>
 
-      {/* Chat Interface */}
+      {/* Main Chat Area */}
       <div className="flex-1 flex flex-col">
-        <Card className="flex-1 flex flex-col">
-          <CardHeader className="border-b">
-            <div className="flex items-center justify-between">
-              <div>
-                <CardTitle className="flex items-center gap-2">
-                  <MessageSquare className="w-5 h-5" />
-                  AI Chat Assistant
-                </CardTitle>
-                {selectedDocument && (
-                  <CardDescription className="mt-1">
-                    Chatting with: {mockDocuments.find(d => d.id === selectedDocument)?.title}
-                  </CardDescription>
-                )}
-              </div>
-              <Badge variant="secondary">
-                {messages.length - 1} messages
-              </Badge>
+        {selectedDocument && document ? (
+          <>
+            <div className="border-b p-4">
+              <h2 className="font-medium">{document.title}</h2>
+              <p className="text-sm text-muted-foreground">
+                Chat with this document
+              </p>
             </div>
-          </CardHeader>
 
-          {/* Messages */}
-          <ScrollArea className="flex-1 p-4">
-            <div className="space-y-6">
-              {messages.map((message) => (
-                <div key={message.id} className="flex gap-3">
-                  <Avatar className="w-8 h-8 flex-shrink-0">
-                    <AvatarFallback className={
-                      message.type === 'user' 
-                        ? 'bg-primary text-primary-foreground' 
-                        : 'bg-accent text-accent-foreground'
-                    }>
-                      {message.type === 'user' ? <User className="w-4 h-4" /> : <Bot className="w-4 h-4" />}
-                    </AvatarFallback>
-                  </Avatar>
-                  
-                  <div className="flex-1 space-y-2">
-                    <div className="flex items-center gap-2">
-                      <span className="font-medium text-sm">
-                        {message.type === 'user' ? 'You' : 'AI Assistant'}
-                      </span>
-                      <span className="text-xs text-muted-foreground">
-                        {message.timestamp.toLocaleTimeString()}
-                      </span>
-                    </div>
-                    
-                    <div className={`p-3 rounded-lg ${
-                      message.type === 'user' 
-                        ? 'bg-primary text-primary-foreground ml-8' 
-                        : 'bg-muted'
-                    }`}>
-                      <p className="whitespace-pre-wrap leading-relaxed">
-                        {message.content}
-                      </p>
-                      
-                      {message.type === 'assistant' && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="mt-2 h-auto p-1 text-xs"
-                          onClick={() => copyToClipboard(message.content)}
-                        >
-                          <Copy className="w-3 h-3 mr-1" />
-                          Copy
-                        </Button>
-                      )}
-                    </div>
-
-                    {/* Sources */}
-                    {message.sources && message.sources.length > 0 && (
-                      <div className="space-y-2">
-                        <p className="text-sm font-medium text-muted-foreground">Sources:</p>
-                        {message.sources.map((source, index) => (
-                          <div key={index} className="p-3 bg-card border rounded-lg">
-                            <div className="flex items-start justify-between mb-2">
-                              <div className="flex items-center gap-2">
-                                <Quote className="w-4 h-4 text-primary" />
-                                <span className="text-sm font-medium">
-                                  Page {source.page} • {source.section}
-                                </span>
-                              </div>
-                              <Badge variant="outline" className="text-xs">
-                                {Math.round(source.confidence * 100)}% match
-                              </Badge>
-                            </div>
-                            <p className="text-sm text-muted-foreground italic">
-                              "{source.text}"
-                            </p>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ))}
-              
-              {isLoading && (
-                <div className="flex gap-3">
-                  <Avatar className="w-8 h-8">
-                    <AvatarFallback className="bg-accent text-accent-foreground">
-                      <Bot className="w-4 h-4" />
-                    </AvatarFallback>
-                  </Avatar>
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2 mb-2">
-                      <span className="font-medium text-sm">AI Assistant</span>
-                      <span className="text-xs text-muted-foreground">typing...</span>
-                    </div>
-                    <div className="p-3 bg-muted rounded-lg">
-                      <div className="flex space-x-1">
-                        <div className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce"></div>
-                        <div className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
-                        <div className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-              
-              <div ref={messagesEndRef} />
-            </div>
-          </ScrollArea>
-
-          {/* Input */}
-          <div className="border-t p-4">
-            {!selectedDocument ? (
-              <div className="text-center text-muted-foreground">
-                <MessageSquare className="w-8 h-8 mx-auto mb-2 opacity-50" />
-                <p>Select a document to start chatting</p>
-              </div>
-            ) : (
-              <div className="flex gap-2">
-                <Textarea
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  placeholder="Ask a question about your document..."
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && !e.shiftKey) {
-                      e.preventDefault()
-                      handleSend()
-                    }
-                  }}
-                  className="min-h-[44px] max-h-32 resize-none"
+            <div className="flex flex-1 overflow-hidden">
+              <div className="flex-1 flex flex-col">
+                <MessageList 
+                  messages={messages} 
+                  onSourceClick={handleSourceClick}
                 />
-                <Button 
-                  onClick={handleSend}
-                  disabled={!input.trim() || isLoading}
-                  className="self-end"
-                >
-                  <Send className="w-4 h-4" />
-                </Button>
+                <ChatInput 
+                  onSend={handleSend} 
+                  disabled={isLoading}
+                  placeholder={`Ask a question about "${document.title}"...`}
+                />
+                <div ref={messagesEndRef} />
               </div>
-            )}
+
+              <ContextPanel 
+                sources={contextSources}
+                isVisible={contextSources.length > 0}
+              />
+            </div>
+          </>
+        ) : (
+          <div className="flex-1 flex items-center justify-center">
+            <div className="text-center">
+              <FileText className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
+              <h3 className="text-lg font-medium mb-2">
+                {docId ? 'Document not found' : 'Select a Document'}
+              </h3>
+              <p className="text-muted-foreground">
+                {docId 
+                  ? 'The requested document could not be found'
+                  : 'Choose a document from the sidebar to start asking questions'
+                }
+              </p>
+            </div>
           </div>
-        </Card>
+        )}
       </div>
     </div>
   )
 }
+
+export default Chat
