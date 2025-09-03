@@ -23,15 +23,12 @@ export const useUploadDocument = () => {
   const { toast } = useToast()
 
   return useMutation({
-    mutationFn: async (file: File) => {
-      const result = await documentApi.upload(file)
-      return result.document
-    },
-    onSuccess: (document) => {
+    mutationFn: documentApi.upload,
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['documents'] })
       toast({
         title: 'Document uploaded successfully!',
-        description: `"${document.title}" is now available in your library.`
+        description: 'Your document is now available in your library.'
       })
     },
     onError: (error: Error) => {
@@ -41,62 +38,6 @@ export const useUploadDocument = () => {
         variant: 'destructive'
       })
     }
-  })
-}
-
-export const useDeleteDocument = () => {
-  const queryClient = useQueryClient()
-  const { toast } = useToast()
-
-  return useMutation({
-    mutationFn: documentApi.delete,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['documents'] })
-      toast({
-        title: 'Document deleted',
-        description: 'The document has been removed from your library.'
-      })
-    },
-    onError: (error: Error) => {
-      toast({
-        title: 'Failed to delete document',
-        description: error.message,
-        variant: 'destructive'
-      })
-    }
-  })
-}
-
-export const useRenameDocument = () => {
-  const queryClient = useQueryClient()
-  const { toast } = useToast()
-
-  return useMutation({
-    mutationFn: ({ id, newTitle }: { id: string; newTitle: string }) =>
-      documentApi.rename(id, newTitle),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['documents'] })
-      toast({
-        title: 'Document renamed',
-        description: 'The document title has been updated.'
-      })
-    },
-    onError: (error: Error) => {
-      toast({
-        title: 'Failed to rename document',
-        description: error.message,
-        variant: 'destructive'
-      })
-    }
-  })
-}
-
-export const useDocumentDownloadUrl = (documentId: string) => {
-  return useQuery({
-    queryKey: ['document-download-url', documentId],
-    queryFn: () => documentApi.getDownloadUrl(documentId),
-    enabled: !!documentId,
-    staleTime: 1000 * 60 * 50, // 50 minutes (signed URL valid for 60 minutes)
   })
 }
 

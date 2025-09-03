@@ -1,6 +1,5 @@
-import { supabase } from '@/lib/supabase/client'
+import { supabase } from '@/integrations/supabase/client'
 import { Database } from '@/integrations/supabase/types'
-import { uploadToStorage, getSignedUrl, deleteFromStorage } from '@/lib/storage'
 
 export type Document = Database['public']['Tables']['documents']['Row']
 export type DocumentInsert = Database['public']['Tables']['documents']['Insert']
@@ -44,73 +43,40 @@ export const documentApi = {
     return data
   },
 
-  async upload(file: File) {
-    const user = await supabase.auth.getUser()
-    if (!user.data.user) throw new Error('Not authenticated')
-
-    try {
-      // Upload file to storage
-      const uploadResult = await uploadToStorage(file, 'documents')
-      
-      // Create document record with storage information
-      const documentData: DocumentInsert = {
-        user_id: user.data.user.id,
-        title: file.name.replace(/\.[^/.]+$/, ''), // Remove file extension
-        filename: file.name,
-        file_size: file.size,
-        file_path: uploadResult.fullPath,
-        status: 'uploaded'
-      }
-
-      const document = await this.create(documentData)
-      
-      return {
-        document,
-        uploadResult
-      }
-    } catch (error) {
-      console.error('Document upload error:', error)
-      throw error
-    }
-  },
-
   async delete(id: string) {
-    // First get the document to get the file path
-    const document = await this.get(id)
-    
-    // Delete from database
-    const { error: dbError } = await supabase
+    const { error } = await supabase
       .from('documents')
       .delete()
       .eq('id', id)
     
-    if (dbError) throw dbError
-
-    // Delete from storage
-    try {
-      await deleteFromStorage(document.file_path, 'documents')
-    } catch (storageError) {
-      console.warn('Failed to delete file from storage:', storageError)
-      // Don't throw here as database deletion was successful
-    }
-  },
-
-  async getDownloadUrl(id: string) {
-    const document = await this.get(id)
-    const signedUrl = await getSignedUrl(document.file_path, 'documents', 3600) // 60 minutes
-    return signedUrl
-  },
-
-  async rename(id: string, newTitle: string) {
-    const { data, error } = await supabase
-      .from('documents')
-      .update({ title: newTitle })
-      .eq('id', id)
-      .select()
-      .single()
-    
     if (error) throw error
-    return data
+  },
+
+  async upload(file: File) {
+    const user = await supabase.auth.getUser()
+    if (!user.data.user) throw new Error('Not authenticated')
+
+    const fileExt = file.name.split('.').pop()
+    const fileName = `${Math.random().toString(36).substring(2)}.${fileExt}`
+    const filePath = `${user.data.user.id}/${fileName}`
+
+    const { error: uploadError } = await supabase.storage
+      .from('documents')
+      .upload(filePath, file)
+
+    if (uploadError) throw uploadError
+
+    // Create document record
+    const documentData: DocumentInsert = {
+      user_id: user.data.user.id,
+      title: file.name.replace(/\.[^/.]+$/, ''),
+      filename: file.name,
+      file_size: file.size,
+      file_path: filePath,
+      status: 'uploaded'
+    }
+
+    return this.create(documentData)
   }
 }
 
@@ -234,39 +200,6 @@ export const quizApi = {
     
     if (error) throw error
     return data
-  }
-}
-
-// RAG API
-export const ragApi = {
-  async *query(documentId: string, question: string): AsyncGenerator<{
-    type: 'chunk' | 'sources' | 'done'
-    content?: string
-    sources?: Array<{ page: number; section: string; text: string; confidence: number }>
-  }> {
-    // Mock streaming implementation
-    const chunks = [
-      "This is a comprehensive analysis of your document...",
-      " The key findings indicate several important patterns...",
-      " Based on the evidence, we can conclude that..."
-    ];
-    
-    const sources = [
-      { page: 1, section: "Introduction", text: "Lorem ipsum dolor sit amet, consectetur adipiscing elit...", confidence: 0.95 },
-      { page: 3, section: "Methodology", text: "Sed do eiusmod tempor incididunt ut labore et dolore magna...", confidence: 0.87 }
-    ];
-    
-    // Simulate streaming chunks
-    for (const chunk of chunks) {
-      await new Promise(resolve => setTimeout(resolve, 800));
-      yield { type: 'chunk', content: chunk };
-    }
-    
-    // Send sources
-    yield { type: 'sources', sources };
-    
-    // Signal completion
-    yield { type: 'done' };
   }
 }
 

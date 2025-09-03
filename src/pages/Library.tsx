@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { FileText, Filter, Grid, List, Plus, Search, Upload, MessageSquare, Brain, Download } from "lucide-react"
+import { FileText, Filter, Grid, List, Plus, Search, Upload, Trash2, MessageSquare, Brain } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -11,12 +11,18 @@ import {
   DropdownMenuTrigger 
 } from "@/components/ui/dropdown-menu"
 import { Link } from "react-router-dom"
-import { useDocuments, useDeleteDocument, useRenameDocument, useDocumentDownloadUrl } from "@/hooks/useQueries"
+import { useDocuments } from "@/hooks/useQueries"
+import { documentApi } from "@/lib/api"
 import { useToast } from "@/hooks/use-toast"
-import { FileThumbnail } from "@/components/ui/file-thumbnail"
-import { DocumentActions } from "@/components/ui/context-menu-actions"
-import { formatFileSize } from "@/lib/storage"
+import { useMutation, useQueryClient } from "@tanstack/react-query"
 
+function formatFileSize(bytes: number) {
+  if (bytes === 0) return '0 Bytes'
+  const k = 1024
+  const sizes = ['Bytes', 'KB', 'MB', 'GB']
+  const i = Math.floor(Math.log(bytes) / Math.log(k))
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i]
+}
 
 export default function Library() {
   const [searchQuery, setSearchQuery] = useState("")
@@ -25,49 +31,25 @@ export default function Library() {
   
   const { data: documents = [], isLoading, error } = useDocuments()
   const { toast } = useToast()
+  const queryClient = useQueryClient()
 
-  const deleteDocument = useDeleteDocument()
-  const renameDocument = useRenameDocument()
-
-  const handleDelete = (id: string) => {
-    deleteDocument.mutate(id)
-  }
-
-  const handleRename = (id: string, newTitle: string) => {
-    renameDocument.mutate({ id, newTitle })
-  }
-
-  const handleDownload = async (id: string) => {
-    try {
-      const document = documents.find(doc => doc.id === id)
-      if (!document) return
-
-      // This would typically use the signed URL
+  const deleteDocument = useMutation({
+    mutationFn: documentApi.delete,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['documents'] })
       toast({
-        title: "Download started",
-        description: `Downloading "${document.title}"...`
+        title: "Document deleted",
+        description: "The document has been removed from your library."
       })
-      
-      // UI stub - actual download implementation would use signed URLs
-      // const downloadUrl = await documentApi.getDownloadUrl(id)
-      // window.open(downloadUrl, '_blank')
-    } catch (error) {
+    },
+    onError: (error: Error) => {
       toast({
-        title: "Download failed",
-        description: error instanceof Error ? error.message : "Unknown error",
+        title: "Failed to delete document",
+        description: error.message,
         variant: "destructive"
       })
     }
-  }
-
-  const handleShare = (id: string) => {
-    // UI stub for sharing functionality
-    const document = documents.find(doc => doc.id === id)
-    toast({
-      title: "Share feature",
-      description: `Sharing functionality for "${document?.title}" will be implemented soon.`
-    })
-  }
+  })
 
   const filteredDocuments = documents.filter(doc =>
     doc.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -255,42 +237,48 @@ export default function Library() {
           {sortedDocuments.map((doc) => (
             <Card key={doc.id} className={`card-hover ${viewMode === "list" ? "flex-row" : ""}`}>
               <CardHeader className={viewMode === "list" ? "flex-row space-y-0 pb-2" : ""}>
-                <div className="flex items-start gap-3 w-full">
-                  <FileThumbnail 
-                    filename={doc.filename} 
-                    size="lg"
-                    className="flex-shrink-0"
-                  />
+                <div className="flex items-start gap-3">
+                  <div className="w-12 h-12 bg-primary/10 rounded-lg flex items-center justify-center flex-shrink-0">
+                    <FileText className="w-6 h-6 text-primary" />
+                  </div>
                   <div className="min-w-0 flex-1">
                     <CardTitle className="text-lg truncate">{doc.title}</CardTitle>
                     <CardDescription className="mt-1">
                       {formatFileSize(doc.file_size)} • {new Date(doc.upload_date).toLocaleDateString()}
                     </CardDescription>
-                    <div className="flex items-center gap-2 mt-2">
-                      <Badge 
-                        variant={doc.status === 'ready' ? 'default' : doc.status === 'error' ? 'destructive' : 'secondary'}
-                        className="text-xs"
-                      >
-                        {doc.status}
-                      </Badge>
-                      <span className="text-xs text-muted-foreground">{doc.filename}</span>
-                    </div>
                   </div>
-                  <DocumentActions
-                    document={{
-                      id: doc.id,
-                      title: doc.title,
-                      filename: doc.filename
-                    }}
-                    onRename={handleRename}
-                    onDelete={handleDelete}
-                    onDownload={handleDownload}
-                    onShare={handleShare}
-                  />
+                  {viewMode === "grid" && (
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="ghost" size="sm">
+                          <span className="sr-only">More options</span>
+                          <div className="w-4 h-4 flex flex-col space-y-1">
+                            <div className="w-1 h-1 bg-current rounded-full"></div>
+                            <div className="w-1 h-1 bg-current rounded-full"></div>
+                            <div className="w-1 h-1 bg-current rounded-full"></div>
+                          </div>
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem 
+                          onClick={() => deleteDocument.mutate(doc.id)}
+                          className="text-destructive"
+                        >
+                          <Trash2 className="w-4 h-4 mr-2" />
+                          Delete
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  )}
                 </div>
               </CardHeader>
               <CardContent className={viewMode === "list" ? "pt-2" : ""}>
                 <div className="space-y-3">
+                  <div className="flex justify-between text-sm text-muted-foreground">
+                    <span className="capitalize">{doc.status}</span>
+                    <span>{doc.filename}</span>
+                  </div>
+                  
                   <div className="flex gap-2">
                     <Link to={`/chat/${doc.id}`} className="flex-1">
                       <Button variant="outline" size="sm" className="w-full">
@@ -304,14 +292,6 @@ export default function Library() {
                         Quiz
                       </Button>
                     </Link>
-                    <Button 
-                      variant="outline" 
-                      size="sm" 
-                      onClick={() => handleDownload(doc.id)}
-                      className="px-3"
-                    >
-                      <Download className="w-4 h-4" />
-                    </Button>
                   </div>
                 </div>
               </CardContent>
