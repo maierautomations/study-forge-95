@@ -1,0 +1,2119 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "StudyRAG API",
+    "description": "\n# StudyRAG API\n\n**RAG-powered Chat with Citations & Quiz Generation for Students**\n\n## Features\n\n- \ud83d\udcda **Document Processing**: Upload and process academic documents (PDF, DOCX, TXT)\n- \ud83d\udd0d **Intelligent Search**: Hybrid search combining BM25 and semantic vector search\n- \ud83d\udcac **RAG Chat**: Get answers with proper citations from your documents\n- \ud83d\udcdd **Quiz Generation**: Auto-generate quizzes based on document content\n- \ud83d\udd12 **Secure**: Row-level security with user isolation\n- \u26a1 **Fast**: Optimized with pgvector for vector operations\n\n## Authentication\n\nAll endpoints (except health checks) require JWT authentication:\n\n```\nAuthorization: Bearer <your-jwt-token>\n```\n\nFor development, use: `Bearer dev-user-123`\n\n## Rate Limits\n\n- Document ingestion: 10 requests/minute\n- RAG queries: 60 requests/minute\n- Quiz generation: 5 requests/minute\n\n## Support\n\n- \ud83d\udcd6 Documentation: See `/docs` for interactive API documentation\n- \ud83d\udc1b Issues: Report bugs via GitHub Issues\n- \ud83d\udca1 Feature requests: Submit enhancement requests\n\n## DSGVO Compliance\n\nThis API is designed for EU compliance:\n- User data isolation via RLS policies  \n- No service keys exposed to frontend\n- Audit logging for data access\n- Right to deletion support\n        ",
+    "contact": {
+      "name": "StudyRAG Team",
+      "email": "support@studyrag.example.com"
+    },
+    "license": {
+      "name": "MIT License",
+      "url": "https://opensource.org/licenses/MIT"
+    },
+    "version": "0.1.0"
+  },
+  "servers": [
+    {
+      "url": "http://localhost:8002",
+      "description": "Development server"
+    },
+    {
+      "url": "https://api.studyrag.example.com",
+      "description": "Production server"
+    }
+  ],
+  "paths": {
+    "/health": {
+      "get": {
+        "tags": [
+          "Health"
+        ],
+        "summary": "Health Check",
+        "description": "Health check endpoint\n\nReturns API status, version, uptime and dependency checks",
+        "operationId": "health_check_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ping": {
+      "get": {
+        "tags": [
+          "Health"
+        ],
+        "summary": "Ping",
+        "description": "Simple ping endpoint for basic availability check",
+        "operationId": "ping_ping_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/schema/validate": {
+      "get": {
+        "tags": [
+          "Schema"
+        ],
+        "summary": "Validate Schema",
+        "description": "Validate database schema according to P1.1 requirements\n\nPerforms comprehensive validation of:\n- Required tables (chunks, embeddings) exist\n- Required indexes (BM25 GIN, Vector IVFFLAT) exist  \n- RLS policies are enabled and configured\n\nReturns detailed validation results for debugging and monitoring.",
+        "operationId": "validate_schema_schema_validate_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SchemaValidationResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/docs/ingest": {
+      "post": {
+        "tags": [
+          "Documents"
+        ],
+        "summary": "Ingest Document",
+        "description": "Start document ingestion process\n\nInitiates background processing of uploaded document:\n1. Extract text content from PDF/DOCX \n2. Create chunks with optimal size/overlap\n3. Generate embeddings via OpenAI\n4. Store in database with RLS protection\n\nReturns job ID for status tracking.",
+        "operationId": "ingest_document_api_v1_docs_ingest_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "name": "X-Trace-ID",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Trace-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IngestRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IngestResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/docs/status": {
+      "get": {
+        "tags": [
+          "Documents"
+        ],
+        "summary": "Get Document Status",
+        "description": "Get document processing status\n\nReturns current processing state and progress information.\nPossible states: pending, processing, completed, failed",
+        "operationId": "get_document_status_api_v1_docs_status_get",
+        "parameters": [
+          {
+            "name": "documentId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Document ID to check status for",
+              "title": "Documentid"
+            },
+            "description": "Document ID to check status for"
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "name": "X-Trace-ID",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Trace-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentStatusResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/docs": {
+      "get": {
+        "tags": [
+          "Documents"
+        ],
+        "summary": "List Documents",
+        "description": "List user's documents\n\nReturns paginated list of user's uploaded documents with processing status.",
+        "operationId": "list_documents_api_v1_docs_get",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "description": "Maximum number of documents to return",
+              "default": 20,
+              "title": "Limit"
+            },
+            "description": "Maximum number of documents to return"
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Number of documents to skip",
+              "default": 0,
+              "title": "Offset"
+            },
+            "description": "Number of documents to skip"
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "name": "X-Trace-ID",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Trace-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/docs/{document_id}": {
+      "delete": {
+        "tags": [
+          "Documents"
+        ],
+        "summary": "Delete Document",
+        "description": "Delete document and all associated data\n\nRemoves document, chunks, and embeddings. This action is irreversible.",
+        "operationId": "delete_document_api_v1_docs__document_id__delete",
+        "parameters": [
+          {
+            "name": "document_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Document Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "name": "X-Trace-ID",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Trace-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/rag/query": {
+      "post": {
+        "tags": [
+          "RAG"
+        ],
+        "summary": "Rag Query",
+        "description": "Query document using RAG (Retrieval Augmented Generation)\n\nProcess:\n1. Generate embedding for user question\n2. Perform hybrid search (BM25 + vector similarity)\n3. Retrieve top relevant chunks as context\n4. Generate answer using LLM with retrieved context\n5. Return answer with source citations\n\nThis is the core StudyRAG functionality for document Q&A.",
+        "operationId": "rag_query_api_v1_rag_query_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "name": "X-Trace-ID",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Trace-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RagQuery"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RagResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/rag/search": {
+      "post": {
+        "tags": [
+          "RAG"
+        ],
+        "summary": "Search Document",
+        "description": "Search document without LLM generation\n\nPerforms hybrid search (BM25 + vector) and returns ranked chunks\nwithout generating an answer. Useful for:\n- Finding specific information quickly\n- Debugging search relevance\n- Building custom interfaces",
+        "operationId": "search_document_api_v1_rag_search_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "name": "X-Trace-ID",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Trace-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SearchQuery"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/quiz/generate": {
+      "post": {
+        "tags": [
+          "Quiz"
+        ],
+        "summary": "Generate Quiz",
+        "description": "Generate quiz from document content\n\nProcess:\n1. Sample relevant chunks from document (spread across sections)\n2. Use LLM to generate questions from selected chunks\n3. Create mix of question types (MC, True/False, Short Answer)\n4. Store quiz for later submission\n5. Return questions for user interaction\n\nGenerated questions include source references for learning feedback.",
+        "operationId": "generate_quiz_api_v1_quiz_generate_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "name": "X-Trace-ID",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Trace-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QuizGenerateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuizGenerateResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/quiz/submit": {
+      "post": {
+        "tags": [
+          "Quiz"
+        ],
+        "summary": "Submit Quiz",
+        "description": "Submit quiz answers and get results\n\nProcess:\n1. Load quiz questions and correct answers\n2. Evaluate each submitted answer\n3. Calculate score and generate feedback\n4. Store results for analytics and progress tracking\n5. Return detailed breakdown with explanations\n\nProvides explanations for incorrect answers to support learning.",
+        "operationId": "submit_quiz_api_v1_quiz_submit_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "name": "X-Trace-ID",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Trace-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QuizSubmitRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuizSubmitResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/": {
+      "get": {
+        "summary": "Root",
+        "operationId": "root__get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Citation": {
+        "properties": {
+          "chunkId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Chunkid",
+            "description": "Chunk ID for reference"
+          },
+          "page": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Page",
+            "description": "Page number (if available)"
+          },
+          "section": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Section",
+            "description": "Section reference (if available)"
+          },
+          "textSnippet": {
+            "type": "string",
+            "maxLength": 500,
+            "title": "Textsnippet",
+            "description": "Relevant text snippet"
+          },
+          "relevanceScore": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Relevancescore",
+            "description": "Relevance score (0-1)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "chunkId",
+          "textSnippet"
+        ],
+        "title": "Citation",
+        "description": "Citation reference from source document",
+        "example": {
+          "chunkId": "660e8400-e29b-41d4-a716-446655440000",
+          "page": 5,
+          "relevanceScore": 0.85,
+          "section": "3.2 Results",
+          "textSnippet": "The experiment showed significant improvement in performance metrics..."
+        }
+      },
+      "DocumentListItem": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id",
+            "description": "Document ID"
+          },
+          "filename": {
+            "type": "string",
+            "title": "Filename",
+            "description": "Original filename"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title",
+            "description": "Document title"
+          },
+          "contentType": {
+            "type": "string",
+            "title": "Contenttype",
+            "description": "MIME type"
+          },
+          "fileSizeBytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filesizebytes",
+            "description": "File size"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "processing",
+              "completed",
+              "failed"
+            ],
+            "title": "Status",
+            "description": "Processing status"
+          },
+          "chunksCount": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chunkscount",
+            "description": "Number of chunks"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Createdat",
+            "description": "Creation timestamp"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updatedat",
+            "description": "Last update timestamp"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "filename",
+          "contentType",
+          "status",
+          "createdAt",
+          "updatedAt"
+        ],
+        "title": "DocumentListItem",
+        "description": "Document list item for GET /documents"
+      },
+      "DocumentListResponse": {
+        "properties": {
+          "timestamp": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Timestamp"
+          },
+          "trace_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trace Id",
+            "description": "Request trace ID for debugging"
+          },
+          "documents": {
+            "items": {
+              "$ref": "#/components/schemas/DocumentListItem"
+            },
+            "type": "array",
+            "title": "Documents",
+            "description": "List of documents"
+          },
+          "totalCount": {
+            "type": "integer",
+            "title": "Totalcount",
+            "description": "Total number of documents"
+          }
+        },
+        "type": "object",
+        "required": [
+          "documents",
+          "totalCount"
+        ],
+        "title": "DocumentListResponse",
+        "description": "Document list response"
+      },
+      "DocumentStatusResponse": {
+        "properties": {
+          "timestamp": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Timestamp"
+          },
+          "trace_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trace Id",
+            "description": "Request trace ID for debugging"
+          },
+          "documentId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Documentid",
+            "description": "Document ID"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "processing",
+              "completed",
+              "failed"
+            ],
+            "title": "Status",
+            "description": "Processing status"
+          },
+          "progress": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 100.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Progress",
+            "description": "Progress percentage (0-100)"
+          },
+          "chunksCreated": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chunkscreated",
+            "description": "Number of chunks created"
+          },
+          "embeddingsCreated": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Embeddingscreated",
+            "description": "Number of embeddings created"
+          },
+          "errorMessage": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Errormessage",
+            "description": "Error message if failed"
+          }
+        },
+        "type": "object",
+        "required": [
+          "documentId",
+          "status"
+        ],
+        "title": "DocumentStatusResponse",
+        "description": "Document processing status response",
+        "example": {
+          "chunksCreated": 25,
+          "documentId": "550e8400-e29b-41d4-a716-446655440000",
+          "embeddingsCreated": 25,
+          "progress": 100.0,
+          "status": "completed",
+          "timestamp": "2024-01-01T00:00:00Z"
+        }
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "HealthResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "version": {
+            "type": "string",
+            "title": "Version"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Timestamp"
+          },
+          "uptime_seconds": {
+            "type": "number",
+            "title": "Uptime Seconds"
+          },
+          "checks": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Checks"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "version",
+          "timestamp",
+          "uptime_seconds",
+          "checks"
+        ],
+        "title": "HealthResponse",
+        "description": "Health check response model"
+      },
+      "IngestRequest": {
+        "properties": {
+          "documentId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Documentid",
+            "description": "Document ID to ingest"
+          },
+          "storagePath": {
+            "type": "string",
+            "title": "Storagepath",
+            "description": "Storage path in Supabase Storage"
+          },
+          "mime": {
+            "type": "string",
+            "title": "Mime",
+            "description": "MIME type of the document"
+          }
+        },
+        "type": "object",
+        "required": [
+          "documentId",
+          "storagePath",
+          "mime"
+        ],
+        "title": "IngestRequest",
+        "description": "Document ingestion request",
+        "example": {
+          "documentId": "550e8400-e29b-41d4-a716-446655440000",
+          "mime": "application/pdf",
+          "storagePath": "documents/user123/report.pdf"
+        }
+      },
+      "IngestResponse": {
+        "properties": {
+          "timestamp": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Timestamp"
+          },
+          "trace_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trace Id",
+            "description": "Request trace ID for debugging"
+          },
+          "status": {
+            "type": "string",
+            "const": "started",
+            "title": "Status",
+            "description": "Ingestion status"
+          },
+          "documentId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Documentid",
+            "description": "Document ID being processed"
+          },
+          "jobId": {
+            "type": "string",
+            "title": "Jobid",
+            "description": "Background job ID for tracking"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "documentId",
+          "jobId"
+        ],
+        "title": "IngestResponse",
+        "description": "Document ingestion response",
+        "example": {
+          "documentId": "550e8400-e29b-41d4-a716-446655440000",
+          "jobId": "job_abc123xyz",
+          "status": "started",
+          "timestamp": "2024-01-01T00:00:00Z",
+          "trace_id": "trace_123"
+        }
+      },
+      "QuizAnswer": {
+        "properties": {
+          "questionId": {
+            "type": "string",
+            "title": "Questionid",
+            "description": "Question ID"
+          },
+          "answer": {
+            "type": "string",
+            "title": "Answer",
+            "description": "User's answer"
+          },
+          "timeSpentSeconds": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timespentseconds",
+            "description": "Time spent on question"
+          }
+        },
+        "type": "object",
+        "required": [
+          "questionId",
+          "answer"
+        ],
+        "title": "QuizAnswer",
+        "description": "Individual quiz answer submission"
+      },
+      "QuizConfig": {
+        "properties": {
+          "questionCount": {
+            "type": "integer",
+            "maximum": 20.0,
+            "minimum": 1.0,
+            "title": "Questioncount",
+            "description": "Number of questions to generate",
+            "default": 5
+          },
+          "difficulty": {
+            "type": "string",
+            "enum": [
+              "easy",
+              "medium",
+              "hard"
+            ],
+            "title": "Difficulty",
+            "description": "Quiz difficulty level",
+            "default": "medium"
+          },
+          "questionTypes": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "multiple_choice",
+                "true_false",
+                "short_answer"
+              ]
+            },
+            "type": "array",
+            "title": "Questiontypes",
+            "description": "Types of questions to generate",
+            "default": [
+              "multiple_choice"
+            ]
+          },
+          "focusSections": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Focussections",
+            "description": "Specific sections to focus on (optional)"
+          }
+        },
+        "type": "object",
+        "title": "QuizConfig",
+        "description": "Quiz generation configuration",
+        "example": {
+          "difficulty": "medium",
+          "focusSections": [
+            "Introduction",
+            "Methodology",
+            "Results"
+          ],
+          "questionCount": 10,
+          "questionTypes": [
+            "multiple_choice",
+            "true_false"
+          ]
+        }
+      },
+      "QuizGenerateRequest": {
+        "properties": {
+          "documentId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Documentid",
+            "description": "Document ID to generate quiz from"
+          },
+          "config": {
+            "$ref": "#/components/schemas/QuizConfig"
+          }
+        },
+        "type": "object",
+        "required": [
+          "documentId",
+          "config"
+        ],
+        "title": "QuizGenerateRequest",
+        "description": "Quiz generation request"
+      },
+      "QuizGenerateResponse": {
+        "properties": {
+          "timestamp": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Timestamp"
+          },
+          "trace_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trace Id",
+            "description": "Request trace ID for debugging"
+          },
+          "quizId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Quizid",
+            "description": "Generated quiz ID"
+          },
+          "documentId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Documentid",
+            "description": "Source document ID"
+          },
+          "questions": {
+            "items": {
+              "$ref": "#/components/schemas/QuizQuestion"
+            },
+            "type": "array",
+            "title": "Questions",
+            "description": "Generated questions"
+          },
+          "config": {
+            "$ref": "#/components/schemas/QuizConfig",
+            "description": "Configuration used"
+          },
+          "expiresAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expiresat",
+            "description": "Quiz expiration time"
+          }
+        },
+        "type": "object",
+        "required": [
+          "quizId",
+          "documentId",
+          "questions",
+          "config"
+        ],
+        "title": "QuizGenerateResponse",
+        "description": "Quiz generation response"
+      },
+      "QuizQuestion": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "Question ID"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "multiple_choice",
+              "true_false",
+              "short_answer"
+            ],
+            "title": "Type",
+            "description": "Question type"
+          },
+          "question": {
+            "type": "string",
+            "title": "Question",
+            "description": "Question text"
+          },
+          "options": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Options",
+            "description": "Answer options (for multiple choice)"
+          },
+          "correctAnswer": {
+            "type": "string",
+            "title": "Correctanswer",
+            "description": "Correct answer"
+          },
+          "explanation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Explanation",
+            "description": "Explanation for the answer"
+          },
+          "sourceChunkId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sourcechunkid",
+            "description": "Source chunk for the question"
+          },
+          "difficulty": {
+            "type": "string",
+            "enum": [
+              "easy",
+              "medium",
+              "hard"
+            ],
+            "title": "Difficulty",
+            "description": "Question difficulty"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "type",
+          "question",
+          "correctAnswer",
+          "difficulty"
+        ],
+        "title": "QuizQuestion",
+        "description": "Individual quiz question",
+        "example": {
+          "correctAnswer": "Option B",
+          "difficulty": "medium",
+          "explanation": "The research clearly states that the main hypothesis focuses on...",
+          "id": "q1",
+          "options": [
+            "Option A",
+            "Option B",
+            "Option C",
+            "Option D"
+          ],
+          "question": "What is the main hypothesis of the research?",
+          "sourceChunkId": "660e8400-e29b-41d4-a716-446655440000",
+          "type": "multiple_choice"
+        }
+      },
+      "QuizResult": {
+        "properties": {
+          "questionId": {
+            "type": "string",
+            "title": "Questionid",
+            "description": "Question ID"
+          },
+          "userAnswer": {
+            "type": "string",
+            "title": "Useranswer",
+            "description": "User's answer"
+          },
+          "correctAnswer": {
+            "type": "string",
+            "title": "Correctanswer",
+            "description": "Correct answer"
+          },
+          "isCorrect": {
+            "type": "boolean",
+            "title": "Iscorrect",
+            "description": "Whether answer is correct"
+          },
+          "explanation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Explanation",
+            "description": "Explanation for the answer"
+          },
+          "pointsEarned": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Pointsearned",
+            "description": "Points earned for this question"
+          },
+          "maxPoints": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Maxpoints",
+            "description": "Maximum points for this question"
+          }
+        },
+        "type": "object",
+        "required": [
+          "questionId",
+          "userAnswer",
+          "correctAnswer",
+          "isCorrect",
+          "pointsEarned",
+          "maxPoints"
+        ],
+        "title": "QuizResult",
+        "description": "Individual question result"
+      },
+      "QuizSubmitRequest": {
+        "properties": {
+          "quizId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Quizid",
+            "description": "Quiz ID"
+          },
+          "answers": {
+            "items": {
+              "$ref": "#/components/schemas/QuizAnswer"
+            },
+            "type": "array",
+            "title": "Answers",
+            "description": "User's answers"
+          },
+          "totalTimeSeconds": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Totaltimeseconds",
+            "description": "Total time spent"
+          }
+        },
+        "type": "object",
+        "required": [
+          "quizId",
+          "answers"
+        ],
+        "title": "QuizSubmitRequest",
+        "description": "Quiz submission request",
+        "example": {
+          "answers": [
+            {
+              "answer": "Option B",
+              "questionId": "q1",
+              "timeSpentSeconds": 45.5
+            }
+          ],
+          "quizId": "770e8400-e29b-41d4-a716-446655440000",
+          "totalTimeSeconds": 300.0
+        }
+      },
+      "QuizSubmitResponse": {
+        "properties": {
+          "timestamp": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Timestamp"
+          },
+          "trace_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trace Id",
+            "description": "Request trace ID for debugging"
+          },
+          "quizId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Quizid",
+            "description": "Quiz ID"
+          },
+          "submissionId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Submissionid",
+            "description": "Submission ID"
+          },
+          "score": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Score",
+            "description": "Total score"
+          },
+          "maxScore": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Maxscore",
+            "description": "Maximum possible score"
+          },
+          "percentage": {
+            "type": "number",
+            "maximum": 100.0,
+            "minimum": 0.0,
+            "title": "Percentage",
+            "description": "Score percentage"
+          },
+          "passed": {
+            "type": "boolean",
+            "title": "Passed",
+            "description": "Whether the quiz was passed"
+          },
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/QuizResult"
+            },
+            "type": "array",
+            "title": "Results",
+            "description": "Detailed results for each question"
+          },
+          "totalQuestions": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Totalquestions",
+            "description": "Total number of questions"
+          },
+          "correctAnswers": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Correctanswers",
+            "description": "Number of correct answers"
+          },
+          "timeSpentSeconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timespentseconds",
+            "description": "Total time spent"
+          }
+        },
+        "type": "object",
+        "required": [
+          "quizId",
+          "submissionId",
+          "score",
+          "maxScore",
+          "percentage",
+          "passed",
+          "results",
+          "totalQuestions",
+          "correctAnswers"
+        ],
+        "title": "QuizSubmitResponse",
+        "description": "Quiz submission response with results",
+        "example": {
+          "correctAnswers": 8,
+          "maxScore": 10.0,
+          "passed": true,
+          "percentage": 80.0,
+          "quizId": "770e8400-e29b-41d4-a716-446655440000",
+          "results": [],
+          "score": 8.0,
+          "submissionId": "880e8400-e29b-41d4-a716-446655440000",
+          "timeSpentSeconds": 300.0,
+          "timestamp": "2024-01-01T00:00:00Z",
+          "totalQuestions": 10
+        }
+      },
+      "RagQuery": {
+        "properties": {
+          "documentId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Documentid",
+            "description": "Document ID to query against"
+          },
+          "question": {
+            "type": "string",
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Question",
+            "description": "User's question"
+          },
+          "maxChunks": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 20.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Maxchunks",
+            "description": "Maximum chunks for context",
+            "default": 10
+          },
+          "includeCitations": {
+            "type": "boolean",
+            "title": "Includecitations",
+            "description": "Include citations in response",
+            "default": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "documentId",
+          "question"
+        ],
+        "title": "RagQuery",
+        "description": "RAG query request",
+        "example": {
+          "documentId": "550e8400-e29b-41d4-a716-446655440000",
+          "includeCitations": true,
+          "maxChunks": 10,
+          "question": "What are the main findings of this research?"
+        }
+      },
+      "RagResponse": {
+        "properties": {
+          "timestamp": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Timestamp"
+          },
+          "trace_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trace Id",
+            "description": "Request trace ID for debugging"
+          },
+          "answer": {
+            "type": "string",
+            "title": "Answer",
+            "description": "Generated answer to the question"
+          },
+          "citations": {
+            "items": {
+              "$ref": "#/components/schemas/Citation"
+            },
+            "type": "array",
+            "title": "Citations",
+            "description": "Source citations for the answer"
+          },
+          "question": {
+            "type": "string",
+            "title": "Question",
+            "description": "Original question for reference"
+          },
+          "documentId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Documentid",
+            "description": "Document ID that was queried"
+          },
+          "processingTimeMs": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Processingtimems",
+            "description": "Processing time in milliseconds"
+          },
+          "modelUsed": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Modelused",
+            "description": "LLM model used for generation"
+          }
+        },
+        "type": "object",
+        "required": [
+          "answer",
+          "citations",
+          "question",
+          "documentId"
+        ],
+        "title": "RagResponse",
+        "description": "RAG response with answer and citations",
+        "example": {
+          "answer": "Based on the research findings, the main discoveries include improved performance metrics and significant cost reductions in the proposed methodology.",
+          "citations": [
+            {
+              "chunkId": "660e8400-e29b-41d4-a716-446655440000",
+              "page": 5,
+              "relevanceScore": 0.85,
+              "section": "3.2 Results",
+              "textSnippet": "The experiment showed significant improvement..."
+            }
+          ],
+          "documentId": "550e8400-e29b-41d4-a716-446655440000",
+          "modelUsed": "gpt-4o-mini",
+          "processingTimeMs": 1250.5,
+          "question": "What are the main findings of this research?",
+          "timestamp": "2024-01-01T00:00:00Z",
+          "trace_id": "rag_trace_123"
+        }
+      },
+      "SchemaValidationResponse": {
+        "properties": {
+          "overall_status": {
+            "type": "string",
+            "title": "Overall Status"
+          },
+          "failed_checks": {
+            "items": {},
+            "type": "array",
+            "title": "Failed Checks"
+          },
+          "summary": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Summary"
+          },
+          "detailed_results": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Detailed Results"
+          }
+        },
+        "type": "object",
+        "required": [
+          "overall_status",
+          "failed_checks",
+          "summary",
+          "detailed_results"
+        ],
+        "title": "SchemaValidationResponse",
+        "description": "Schema validation response model"
+      },
+      "SearchQuery": {
+        "properties": {
+          "documentId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Documentid",
+            "description": "Document ID to search"
+          },
+          "query": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Query",
+            "description": "Search query"
+          },
+          "limit": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 50.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Limit",
+            "description": "Maximum results to return",
+            "default": 10
+          },
+          "searchType": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Searchtype",
+            "description": "Search type: semantic, bm25, or hybrid",
+            "default": "hybrid"
+          }
+        },
+        "type": "object",
+        "required": [
+          "documentId",
+          "query"
+        ],
+        "title": "SearchQuery",
+        "description": "Semantic search query (without LLM generation)"
+      },
+      "SearchResponse": {
+        "properties": {
+          "timestamp": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Timestamp"
+          },
+          "trace_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trace Id",
+            "description": "Request trace ID for debugging"
+          },
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/SearchResult"
+            },
+            "type": "array",
+            "title": "Results",
+            "description": "Search results"
+          },
+          "query": {
+            "type": "string",
+            "title": "Query",
+            "description": "Original search query"
+          },
+          "documentId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Documentid",
+            "description": "Document ID searched"
+          },
+          "totalChunks": {
+            "type": "integer",
+            "title": "Totalchunks",
+            "description": "Total chunks in document"
+          },
+          "searchType": {
+            "type": "string",
+            "title": "Searchtype",
+            "description": "Search type used"
+          }
+        },
+        "type": "object",
+        "required": [
+          "results",
+          "query",
+          "documentId",
+          "totalChunks",
+          "searchType"
+        ],
+        "title": "SearchResponse",
+        "description": "Search results response"
+      },
+      "SearchResult": {
+        "properties": {
+          "chunkId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Chunkid",
+            "description": "Chunk ID"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content",
+            "description": "Chunk content"
+          },
+          "score": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Score",
+            "description": "Search relevance score"
+          },
+          "page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Page",
+            "description": "Page number"
+          },
+          "section": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Section",
+            "description": "Section reference"
+          }
+        },
+        "type": "object",
+        "required": [
+          "chunkId",
+          "content",
+          "score"
+        ],
+        "title": "SearchResult",
+        "description": "Individual search result"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      }
+    },
+    "securitySchemes": {
+      "BearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "JWT token from Supabase Auth. For development use: `dev-user-123`"
+      }
+    },
+    "examples": {
+      "ErrorResponse": {
+        "summary": "Standard error response",
+        "value": {
+          "type": "/errors/validation-error",
+          "title": "Validation Error",
+          "status": 422,
+          "detail": "The request contains invalid data",
+          "timestamp": "2024-01-01T00:00:00Z",
+          "trace_id": "abc123"
+        }
+      }
+    }
+  },
+  "security": [
+    {
+      "BearerAuth": []
+    }
+  ],
+  "tags": [
+    {
+      "name": "Health",
+      "description": "Health check and system status endpoints"
+    },
+    {
+      "name": "Schema",
+      "description": "Database schema validation endpoints"
+    },
+    {
+      "name": "Documents",
+      "description": "Document upload, processing and management"
+    },
+    {
+      "name": "RAG",
+      "description": "Retrieval Augmented Generation - chat with documents"
+    },
+    {
+      "name": "Quiz",
+      "description": "Quiz generation and submission from document content"
+    }
+  ]
+}
