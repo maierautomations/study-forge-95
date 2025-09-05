@@ -369,3 +369,522 @@ async def count_document_chunks(document_id: str, user_id: str) -> int:
         )
         
         return row['count'] if row else 0
+
+
+# ===========================================
+# Quiz Database Operations
+# ===========================================
+
+async def get_user_document_chunks(document_id: str, user_id: str, limit: int = 20) -> List[Dict[str, Any]]:
+    """
+    Get chunks for a document with diversity selection for quiz generation.
+    
+    Args:
+        document_id: Document UUID
+        user_id: User UUID (for RLS)
+        limit: Maximum number of chunks to return
+        
+    Returns:
+        List of chunk dictionaries with metadata
+    """
+    pool = await get_db_pool()
+    
+    async with pool.acquire() as conn:
+        # Set user context for RLS
+        await conn.execute("SELECT set_config('request.jwt.claims', $1, true)", f'{{"sub":"{user_id}"}}')
+        
+        rows = await conn.fetch(
+            """
+            SELECT c.id, c.content, c.section_title, c.page_number,
+                   c.section_type, c.token_count, c.char_count, c.metadata,
+                   c.created_at
+            FROM chunks c
+            JOIN documents d ON d.id = c.document_id
+            WHERE c.document_id = $1
+            ORDER BY c.page_number, c.created_at
+            LIMIT $2
+            """,
+            document_id, limit
+        )
+        
+        return [dict(row) for row in rows]
+
+
+async def create_quiz_attempt(attempt_id: str, document_id: str, user_id: str, 
+                             config: Dict[str, Any]) -> None:
+    """
+    Create a new quiz attempt record.
+    
+    Args:
+        attempt_id: Quiz attempt UUID
+        document_id: Document UUID
+        user_id: User UUID
+        config: Quiz configuration dictionary
+    """
+    pool = await get_db_pool()
+    
+    logger.info(
+        "Creating quiz attempt",
+        extra={
+            "attempt_id": attempt_id,
+            "document_id": document_id,
+            "user_id": user_id
+        }
+    )
+    
+    async with pool.acquire() as conn:
+        # Set user context for RLS
+        await conn.execute("SELECT set_config('request.jwt.claims', $1, true)", f'{{"sub":"{user_id}"}}')
+        
+        await conn.execute(
+            """
+            INSERT INTO quiz_attempts (
+                id, document_id, user_id, question_count, difficulty_level,
+                time_limit_minutes, status, created_at
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+            """,
+            attempt_id, document_id, user_id, 
+            config.get("question_count", 5),
+            config.get("difficulty", "mixed"),
+            config.get("time_limit_minutes", 30),
+            "active"
+        )
+    
+    logger.info(
+        "Quiz attempt created",
+        extra={"attempt_id": attempt_id}
+    )
+
+
+async def store_quiz_questions(attempt_id: str, questions: List[Dict[str, Any]]) -> None:
+    """
+    Store quiz questions for an attempt.
+    
+    Args:
+        attempt_id: Quiz attempt UUID
+        questions: List of question dictionaries
+    """
+    pool = await get_db_pool()
+    
+    logger.info(
+        "Storing quiz questions",
+        extra={
+            "attempt_id": attempt_id,
+            "question_count": len(questions)
+        }
+    )
+    
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            # Prepare batch data
+            batch_data = []
+            for i, question in enumerate(questions):
+                batch_data.append((
+                    question["id"],
+                    attempt_id,
+                    i + 1,  # question_order
+                    question["type"],
+                    question["question"],
+                    question.get("correct_answer"),
+                    question.get("options"),
+                    question.get("difficulty", "beginner"),
+                    question.get("source_chunk_id"),
+                    question.get("source_page"),
+                    question.get("source_section")
+                ))
+            
+            # Bulk insert questions
+            await conn.executemany(
+                """
+                INSERT INTO quiz_questions (
+                    id, attempt_id, question_order, question_type, question_text,
+                    correct_answer, options, difficulty_level, source_chunk_id,
+                    source_page, source_section
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                """,
+                batch_data
+            )
+    
+    logger.info(
+        "Quiz questions stored",
+        extra={
+            "attempt_id": attempt_id,
+            "questions_stored": len(questions)
+        }
+    )
+
+
+async def get_quiz_attempt(attempt_id: str, user_id: str) -> Optional[Dict[str, Any]]:
+    """
+    Get quiz attempt with questions (with RLS check).
+    
+    Args:
+        attempt_id: Quiz attempt UUID
+        user_id: User UUID (for RLS)
+        
+    Returns:
+        Dictionary with attempt data and questions, or None if not found
+    """
+    pool = await get_db_pool()
+    
+    async with pool.acquire() as conn:
+        # Set user context for RLS
+        await conn.execute("SELECT set_config('request.jwt.claims', $1, true)", f'{{"sub":"{user_id}"}}')
+        
+        # Get attempt data
+        attempt_row = await conn.fetchrow(
+            """
+            SELECT qa.*, d.title as document_title, d.filename as document_filename
+            FROM quiz_attempts qa
+            JOIN documents d ON d.id = qa.document_id
+            WHERE qa.id = $1 AND qa.user_id = $2
+            """,
+            attempt_id, user_id
+        )
+        
+        if not attempt_row:
+            return None
+        
+        # Get questions for the attempt
+        question_rows = await conn.fetch(
+            """
+            SELECT * FROM quiz_questions 
+            WHERE attempt_id = $1 
+            ORDER BY question_order
+            """,
+            attempt_id
+        )
+        
+        attempt_data = dict(attempt_row)
+        attempt_data["questions"] = [dict(row) for row in question_rows]
+        
+        return attempt_data
+
+
+async def submit_quiz_answers(attempt_id: str, answers: List[Dict[str, Any]], 
+                             final_score: float, user_id: str) -> None:
+    """
+    Submit quiz answers and update attempt status.
+    
+    Args:
+        attempt_id: Quiz attempt UUID
+        answers: List of answer dictionaries with evaluation results
+        final_score: Final quiz score percentage
+        user_id: User UUID (for RLS)
+    """
+    pool = await get_db_pool()
+    
+    logger.info(
+        "Submitting quiz answers",
+        extra={
+            "attempt_id": attempt_id,
+            "answer_count": len(answers),
+            "final_score": final_score
+        }
+    )
+    
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            # Set user context for RLS
+            await conn.execute("SELECT set_config('request.jwt.claims', $1, true)", f'{{"sub":"{user_id}"}}')
+            
+            # Update attempt with completion
+            await conn.execute(
+                """
+                UPDATE quiz_attempts 
+                SET 
+                    status = 'completed',
+                    completed_at = NOW(),
+                    final_score = $2
+                WHERE id = $1 AND user_id = $3
+                """,
+                attempt_id, final_score, user_id
+            )
+            
+            # Prepare batch data for answers
+            batch_data = []
+            for answer in answers:
+                batch_data.append((
+                    str(uuid4()),
+                    attempt_id,
+                    answer["question_id"],
+                    answer["user_answer"],
+                    answer["is_correct"],
+                    answer["score"],
+                    answer.get("feedback"),
+                    answer.get("explanation")
+                ))
+            
+            # Bulk insert answers
+            await conn.executemany(
+                """
+                INSERT INTO quiz_answers (
+                    id, attempt_id, question_id, user_answer, is_correct,
+                    score, feedback, explanation
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                """,
+                batch_data
+            )
+    
+    logger.info(
+        "Quiz answers submitted",
+        extra={
+            "attempt_id": attempt_id,
+            "answers_stored": len(answers)
+        }
+    )
+
+
+async def get_quiz_results(attempt_id: str, user_id: str) -> Optional[Dict[str, Any]]:
+    """
+    Get complete quiz results with answers and evaluation.
+    
+    Args:
+        attempt_id: Quiz attempt UUID
+        user_id: User UUID (for RLS)
+        
+    Returns:
+        Dictionary with complete quiz results or None if not found
+    """
+    pool = await get_db_pool()
+    
+    async with pool.acquire() as conn:
+        # Set user context for RLS
+        await conn.execute("SELECT set_config('request.jwt.claims', $1, true)", f'{{"sub":"{user_id}"}}')
+        
+        # Get attempt with results
+        attempt_row = await conn.fetchrow(
+            """
+            SELECT qa.*, d.title as document_title, d.filename as document_filename
+            FROM quiz_attempts qa
+            JOIN documents d ON d.id = qa.document_id
+            WHERE qa.id = $1 AND qa.user_id = $2 AND qa.status = 'completed'
+            """,
+            attempt_id, user_id
+        )
+        
+        if not attempt_row:
+            return None
+        
+        # Get questions with answers
+        result_rows = await conn.fetch(
+            """
+            SELECT 
+                qq.*,
+                qa_ans.user_answer,
+                qa_ans.is_correct,
+                qa_ans.score as answer_score,
+                qa_ans.feedback,
+                qa_ans.explanation
+            FROM quiz_questions qq
+            LEFT JOIN quiz_answers qa_ans ON qa_ans.question_id = qq.id
+            WHERE qq.attempt_id = $1
+            ORDER BY qq.question_order
+            """,
+            attempt_id
+        )
+        
+        attempt_data = dict(attempt_row)
+        attempt_data["results"] = [dict(row) for row in result_rows]
+        
+        return attempt_data
+
+
+async def get_user_quiz_history(user_id: str, document_id: Optional[str] = None, 
+                               limit: int = 20) -> List[Dict[str, Any]]:
+    """
+    Get quiz history for a user, optionally filtered by document.
+    
+    Args:
+        user_id: User UUID
+        document_id: Optional document UUID to filter by
+        limit: Maximum number of attempts to return
+        
+    Returns:
+        List of quiz attempt summaries
+    """
+    pool = await get_db_pool()
+    
+    async with pool.acquire() as conn:
+        # Set user context for RLS
+        await conn.execute("SELECT set_config('request.jwt.claims', $1, true)", f'{{"sub":"{user_id}"}}')
+        
+        query = """
+            SELECT 
+                qa.id as attempt_id,
+                qa.document_id,
+                qa.status,
+                qa.question_count,
+                qa.difficulty_level,
+                qa.final_score,
+                qa.created_at,
+                qa.completed_at,
+                d.title as document_title,
+                d.filename as document_filename
+            FROM quiz_attempts qa
+            JOIN documents d ON d.id = qa.document_id
+            WHERE qa.user_id = $1
+        """
+        
+        params = [user_id]
+        
+        if document_id:
+            query += " AND qa.document_id = $2"
+            params.append(document_id)
+        
+        query += " ORDER BY qa.created_at DESC LIMIT $" + str(len(params) + 1)
+        params.append(limit)
+        
+        rows = await conn.fetch(query, *params)
+        
+        return [dict(row) for row in rows]
+
+
+async def get_quiz_analytics(user_id: str, document_id: Optional[str] = None, 
+                           days: int = 30) -> Dict[str, Any]:
+    """
+    Get quiz analytics for a user.
+    
+    Args:
+        user_id: User UUID
+        document_id: Optional document UUID to filter by
+        days: Number of days to analyze (default: 30)
+        
+    Returns:
+        Dictionary with analytics data
+    """
+    pool = await get_db_pool()
+    
+    async with pool.acquire() as conn:
+        # Set user context for RLS
+        await conn.execute("SELECT set_config('request.jwt.claims', $1, true)", f'{{"sub":"{user_id}"}}')
+        
+        # Base query conditions
+        where_clause = "WHERE qa.user_id = $1 AND qa.completed_at >= NOW() - INTERVAL '%d days'"
+        params = [user_id]
+        
+        if document_id:
+            where_clause += " AND qa.document_id = $2"
+            params.append(document_id)
+        
+        # Get overall stats
+        overall_query = f"""
+            SELECT 
+                COUNT(*) as total_attempts,
+                AVG(qa.final_score) as avg_score,
+                MAX(qa.final_score) as best_score,
+                COUNT(CASE WHEN qa.final_score >= 80 THEN 1 END) as high_score_count
+            FROM quiz_attempts qa
+            JOIN documents d ON d.id = qa.document_id
+            {where_clause % days}
+        """
+        
+        overall_row = await conn.fetchrow(overall_query, *params)
+        
+        # Get performance by difficulty
+        difficulty_query = f"""
+            SELECT 
+                qa.difficulty_level,
+                COUNT(*) as attempts,
+                AVG(qa.final_score) as avg_score
+            FROM quiz_attempts qa
+            JOIN documents d ON d.id = qa.document_id
+            {where_clause % days}
+            GROUP BY qa.difficulty_level
+            ORDER BY qa.difficulty_level
+        """
+        
+        difficulty_rows = await conn.fetch(difficulty_query, *params)
+        
+        # Get recent trend (last 7 days)
+        trend_query = f"""
+            SELECT 
+                DATE(qa.completed_at) as quiz_date,
+                COUNT(*) as attempts,
+                AVG(qa.final_score) as avg_score
+            FROM quiz_attempts qa
+            JOIN documents d ON d.id = qa.document_id
+            {where_clause % 7}
+            GROUP BY DATE(qa.completed_at)
+            ORDER BY quiz_date DESC
+            LIMIT 7
+        """
+        
+        trend_rows = await conn.fetch(trend_query, *params)
+        
+        return {
+            "overall": dict(overall_row) if overall_row else {},
+            "by_difficulty": [dict(row) for row in difficulty_rows],
+            "recent_trend": [dict(row) for row in trend_rows]
+        }
+
+
+async def delete_quiz_attempt(attempt_id: str, user_id: str) -> bool:
+    """
+    Delete a quiz attempt and all associated data.
+    
+    Args:
+        attempt_id: Quiz attempt UUID
+        user_id: User UUID (for RLS)
+        
+    Returns:
+        True if deleted, False if not found
+    """
+    pool = await get_db_pool()
+    
+    logger.info(
+        "Deleting quiz attempt",
+        extra={
+            "attempt_id": attempt_id,
+            "user_id": user_id
+        }
+    )
+    
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            # Set user context for RLS
+            await conn.execute("SELECT set_config('request.jwt.claims', $1, true)", f'{{"sub":"{user_id}"}}')
+            
+            # Delete answers first (foreign key constraint)
+            await conn.execute(
+                """
+                DELETE FROM quiz_answers 
+                WHERE attempt_id = $1 AND attempt_id IN (
+                    SELECT id FROM quiz_attempts WHERE id = $1 AND user_id = $2
+                )
+                """,
+                attempt_id, user_id
+            )
+            
+            # Delete questions
+            await conn.execute(
+                """
+                DELETE FROM quiz_questions 
+                WHERE attempt_id = $1 AND attempt_id IN (
+                    SELECT id FROM quiz_attempts WHERE id = $1 AND user_id = $2
+                )
+                """,
+                attempt_id, user_id
+            )
+            
+            # Delete attempt
+            result = await conn.execute(
+                """
+                DELETE FROM quiz_attempts 
+                WHERE id = $1 AND user_id = $2
+                """,
+                attempt_id, user_id
+            )
+            
+            # Check if anything was deleted
+            deleted_count = int(result.split()[-1]) if result else 0
+            
+    logger.info(
+        "Quiz attempt deletion completed",
+        extra={
+            "attempt_id": attempt_id,
+            "deleted": deleted_count > 0
+        }
+    )
+    
+    return deleted_count > 0

@@ -1,11 +1,10 @@
 """Quiz generation and submission endpoints"""
 
 import logging
-import uuid
 from typing import Optional
 from datetime import datetime, timedelta
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from uuid import UUID
 
 from app.models.quiz import (
@@ -18,6 +17,9 @@ from app.models.quiz import (
     QuizConfig
 )
 from app.api.deps import get_current_user_id, get_trace_id
+from app.services.quiz import QuizOrchestrator
+from app.services.quiz.question_generator import QuestionType, DifficultyLevel
+from app.services.quiz.quiz_orchestrator import QuizConfig as ServiceQuizConfig
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -53,95 +55,103 @@ async def generate_quiz(
         }
     )
     
-    # DUMMY: Generate sample quiz questions
-    quiz_id = UUID(f"{uuid.uuid4()}")
-    
-    dummy_questions = [
-        QuizQuestion(
-            id="q1",
-            type="multiple_choice",
-            question="What is the primary methodology used in the research?",
-            options=[
-                "Cross-validation with statistical significance testing",
-                "Simple randomized controlled trial",
-                "Observational case study analysis", 
-                "Theoretical mathematical modeling"
-            ],
-            correctAnswer="Cross-validation with statistical significance testing",
-            explanation="The document explicitly states that cross-validation techniques and statistical significance testing were employed to validate results, as mentioned in the methodology section.",
-            sourceChunkId=UUID("660e8400-e29b-41d4-a716-446655440000"),
-            difficulty="medium"
-        ),
-        QuizQuestion(
-            id="q2", 
-            type="true_false",
-            question="The research findings show statistical significance with p < 0.05.",
-            options=None,
-            correctAnswer="true",
-            explanation="The document clearly states that statistical analysis reveals the observed improvements are statistically significant (p < 0.05).",
-            sourceChunkId=UUID("660e8400-e29b-41d4-a716-446655440002"),
-            difficulty="easy"
-        ),
-        QuizQuestion(
-            id="q3",
-            type="multiple_choice", 
-            question="According to the document, what was the performance improvement compared to baseline approaches?",
-            options=[
-                "5% increase in accuracy",
-                "10% increase in accuracy",
-                "15% increase in accuracy",
-                "20% increase in accuracy"
-            ],
-            correctAnswer="15% increase in accuracy",
-            explanation="The experimental results section specifically mentions a 15% increase in accuracy compared to baseline approaches.",
-            sourceChunkId=UUID("660e8400-e29b-41d4-a716-446655440000"),
-            difficulty="easy"
-        ),
-        QuizQuestion(
-            id="q4",
-            type="short_answer",
-            question="What are the main application domains mentioned for the research findings?",
-            options=None,
-            correctAnswer="industrial automation, data processing pipelines, real-time decision support systems",
-            explanation="The conclusions section mentions three key application domains: industrial automation, data processing pipelines, and real-time decision support systems.",
-            sourceChunkId=UUID("660e8400-e29b-41d4-a716-446655440002"),
-            difficulty="medium"
-        ),
-        QuizQuestion(
-            id="q5",
-            type="true_false",
-            question="The proposed approach addresses limitations identified in earlier studies.",
-            options=None,
-            correctAnswer="true", 
-            explanation="The discussion section explicitly states that the approach addresses key limitations identified in earlier studies.",
-            sourceChunkId=UUID("660e8400-e29b-41d4-a716-446655440001"),
-            difficulty="easy"
+    try:
+        # Convert API models to service models
+        question_types = []
+        for qtype in request.config.question_types:
+            if qtype == "multiple_choice":
+                question_types.append(QuestionType.MULTIPLE_CHOICE)
+            elif qtype == "true_false":
+                question_types.append(QuestionType.TRUE_FALSE)
+            elif qtype == "short_answer":
+                question_types.append(QuestionType.SHORT_ANSWER)
+        
+        # Convert difficulty if specified
+        difficulty = None
+        if request.config.difficulty:
+            if request.config.difficulty == "easy":
+                difficulty = DifficultyLevel.BEGINNER
+            elif request.config.difficulty == "medium":
+                difficulty = DifficultyLevel.INTERMEDIATE
+            elif request.config.difficulty == "hard":
+                difficulty = DifficultyLevel.ADVANCED
+        
+        # Create service configuration
+        service_config = ServiceQuizConfig(
+            question_count=request.config.question_count,
+            question_types=question_types,
+            difficulty=difficulty,
+            time_limit_minutes=30  # Default time limit
         )
-    ]
-    
-    # Filter questions based on requested count and types
-    filtered_questions = []
-    for q in dummy_questions:
-        if len(filtered_questions) >= request.config.question_count:
-            break
-        if q.type in request.config.question_types:
-            filtered_questions.append(q)
-    
-    # If not enough questions, pad with remaining questions regardless of type
-    while len(filtered_questions) < request.config.question_count and len(filtered_questions) < len(dummy_questions):
-        for q in dummy_questions:
-            if q not in filtered_questions:
-                filtered_questions.append(q)
-                break
-    
-    return QuizGenerateResponse(
-        quiz_id=quiz_id,
-        document_id=request.document_id,
-        questions=filtered_questions,
-        config=request.config,
-        expires_at=(datetime.utcnow() + timedelta(hours=24)).isoformat(),
-        trace_id=trace_id
-    )
+        
+        # Generate quiz using orchestrator
+        async with QuizOrchestrator() as orchestrator:
+            quiz_result = await orchestrator.generate_quiz(
+                document_id=str(request.document_id),
+                user_id=str(user_id),
+                config=service_config
+            )
+        
+        # Convert service questions to API models
+        api_questions = []
+        for q in quiz_result["questions"]:
+            # Convert question type
+            question_type = q["type"]
+            if question_type == "multiple_choice":
+                api_type = "multiple_choice"
+            elif question_type == "true_false":
+                api_type = "true_false"
+            elif question_type == "short_answer":
+                api_type = "short_answer"
+            else:
+                api_type = "multiple_choice"  # fallback
+            
+            # Convert difficulty
+            difficulty_str = q.get("difficulty", "beginner")
+            if difficulty_str == "beginner":
+                api_difficulty = "easy"
+            elif difficulty_str == "intermediate":
+                api_difficulty = "medium"
+            elif difficulty_str == "advanced":
+                api_difficulty = "hard"
+            else:
+                api_difficulty = "easy"  # fallback
+            
+            api_question = QuizQuestion(
+                id=q["id"],
+                type=api_type,
+                question=q["question"],
+                options=q.get("options"),
+                correctAnswer=None,  # Don't send correct answer to client
+                explanation=None,    # Don't send explanation to client yet
+                sourceChunkId=UUID(q["source_reference"]["chunk_id"]) if q.get("source_reference") and q["source_reference"].get("chunk_id") else None,
+                difficulty=api_difficulty
+            )
+            api_questions.append(api_question)
+        
+        return QuizGenerateResponse(
+            quiz_id=UUID(quiz_result["attempt_id"]),
+            document_id=request.document_id,
+            questions=api_questions,
+            config=request.config,
+            expires_at=quiz_result["expires_at"],
+            trace_id=trace_id
+        )
+        
+    except Exception as e:
+        logger.error(
+            "Quiz generation failed",
+            extra={
+                "trace_id": trace_id,
+                "document_id": str(request.document_id),
+                "user_id": str(user_id),
+                "error": str(e)
+            }
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to generate quiz: {str(e)}"
+        )
 
 
 @router.post("/submit", response_model=QuizSubmitResponse)
@@ -173,67 +183,82 @@ async def submit_quiz(
         }
     )
     
-    # DUMMY: Simulate grading with realistic results
-    submission_id = UUID(f"{uuid.uuid4()}")
-    
-    # Sample correct answers (matching the generated quiz above)
-    correct_answers = {
-        "q1": "Cross-validation with statistical significance testing",
-        "q2": "true", 
-        "q3": "15% increase in accuracy",
-        "q4": "industrial automation, data processing pipelines, real-time decision support systems",
-        "q5": "true"
-    }
-    
-    results = []
-    total_score = 0.0
-    max_score = len(request.answers) * 1.0  # 1 point per question
-    
-    for answer in request.answers:
-        question_id = answer.question_id
-        user_answer = answer.answer.lower().strip() if answer.answer else ""
+    try:
+        # Convert API answer models to service format
+        service_answers = []
+        for answer in request.answers:
+            service_answers.append({
+                "question_id": answer.question_id,
+                "answer": answer.answer
+            })
         
-        # Get correct answer
-        correct_answer = correct_answers.get(question_id, "").lower().strip()
+        # Submit quiz using orchestrator
+        async with QuizOrchestrator() as orchestrator:
+            submission_result = await orchestrator.submit_quiz_answers(
+                attempt_id=str(request.quiz_id),
+                answers=service_answers,
+                user_id=str(user_id)
+            )
         
-        # Simple evaluation logic
-        is_correct = False
-        if question_id in ["q2", "q5"]:  # True/False questions
-            is_correct = user_answer == correct_answer
-        elif question_id in ["q1", "q3"]:  # Multiple choice
-            is_correct = user_answer in correct_answer
-        elif question_id == "q4":  # Short answer - partial credit
-            keywords = ["automation", "processing", "decision", "support"]
-            matched_keywords = sum(1 for kw in keywords if kw in user_answer)
-            is_correct = matched_keywords >= 2  # At least 2 keywords
+        # Convert service results to API models
+        api_results = []
+        for result in submission_result["evaluation_results"]:
+            api_result = QuizResult(
+                questionId=result["question_id"],
+                userAnswer=result["user_answer"],
+                correctAnswer=None,  # Will be filled from explanation
+                isCorrect=result["correct"],
+                explanation=result["explanation"],
+                pointsEarned=result["score"],
+                maxPoints=result["max_score"]
+            )
+            api_results.append(api_result)
         
-        points_earned = 1.0 if is_correct else 0.0
-        total_score += points_earned
+        # Calculate totals
+        total_score = sum(r.pointsEarned for r in api_results)
+        max_score = sum(r.maxPoints for r in api_results)
+        percentage = submission_result["score"]  # Already calculated as percentage
+        passed = percentage >= 70.0  # 70% pass threshold
         
-        results.append(QuizResult(
-            questionId=question_id,
-            userAnswer=answer.answer,
-            correctAnswer=correct_answers.get(question_id, "Unknown"),
-            isCorrect=is_correct,
-            explanation=f"Explanation for question {question_id} based on document content.",
-            pointsEarned=points_earned,
-            maxPoints=1.0
-        ))
-    
-    percentage = (total_score / max_score) * 100 if max_score > 0 else 0
-    passed = percentage >= 70.0  # 70% pass threshold
-    correct_count = sum(1 for r in results if r.is_correct)
-    
-    return QuizSubmitResponse(
-        quiz_id=request.quiz_id,
-        submission_id=submission_id,
-        score=total_score,
-        max_score=max_score,
-        percentage=percentage,
-        passed=passed,
-        results=results,
-        total_questions=len(request.answers),
-        correct_answers=correct_count,
-        time_spent_seconds=request.total_time_seconds,
-        trace_id=trace_id
-    )
+        return QuizSubmitResponse(
+            quiz_id=request.quiz_id,
+            submission_id=UUID(submission_result["attempt_id"]),  # Use attempt_id as submission_id
+            score=total_score,
+            max_score=max_score,
+            percentage=percentage,
+            passed=passed,
+            results=api_results,
+            total_questions=submission_result["total_questions"],
+            correct_answers=submission_result["correct_answers"],
+            time_spent_seconds=request.total_time_seconds,
+            trace_id=trace_id
+        )
+        
+    except ValueError as e:
+        logger.warning(
+            "Quiz submission validation error",
+            extra={
+                "trace_id": trace_id,
+                "quiz_id": str(request.quiz_id),
+                "user_id": str(user_id),
+                "error": str(e)
+            }
+        )
+        raise HTTPException(
+            status_code=400,
+            detail=str(e)
+        )
+    except Exception as e:
+        logger.error(
+            "Quiz submission failed",
+            extra={
+                "trace_id": trace_id,
+                "quiz_id": str(request.quiz_id),
+                "user_id": str(user_id),
+                "error": str(e)
+            }
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to submit quiz: {str(e)}"
+        )
