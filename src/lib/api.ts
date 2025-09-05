@@ -1,58 +1,77 @@
-import { supabase } from '@/integrations/supabase/client'
-import { Database } from '@/integrations/supabase/types'
+// FastAPI Backend API Client
+import type { components } from './api/generated'
 
-export type Document = Database['public']['Tables']['documents']['Row']
-export type DocumentInsert = Database['public']['Tables']['documents']['Insert']
-export type ChatSession = Database['public']['Tables']['chat_sessions']['Row']
-export type ChatMessage = Database['public']['Tables']['chat_messages']['Row']
-export type QuizConfig = Database['public']['Tables']['quiz_configs']['Row']
-export type QuizAttempt = Database['public']['Tables']['quiz_attempts']['Row']
-export type Profile = Database['public']['Tables']['profiles']['Row']
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
 
-// Document API
+// Type aliases for cleaner usage
+export type Document = components['schemas']['DocumentListItem']
+export type DocumentUploadResponse = components['schemas']['IngestResponse']
+export type DocumentStatusResponse = components['schemas']['DocumentStatusResponse']
+export type DocumentListResponse = components['schemas']['DocumentListResponse']
+export type ChatSession = components['schemas']['ChatSession']
+export type ChatMessage = components['schemas']['ChatMessage']
+export type QuizConfig = components['schemas']['QuizConfig']
+export type QuizAttempt = components['schemas']['QuizAttempt'] // Will be defined in backend
+export type Profile = components['schemas']['ProfileResponse']
+export type ProfileUpdateRequest = components['schemas']['ProfileUpdateRequest']
+export type RagQuery = components['schemas']['RagQuery']
+export type RagResponse = components['schemas']['RagResponse']
+export type SearchQuery = components['schemas']['SearchQuery']
+export type SearchResponse = components['schemas']['SearchResponse']
+
+// API Client with authentication
+class ApiClient {
+  private async getHeaders() {
+    // Get JWT token from Supabase Auth
+    const { supabase } = await import('@/integrations/supabase/client')
+    const { data: { session } } = await supabase.auth.getSession()
+
+    return {
+      'Content-Type': 'application/json',
+      'Authorization': session?.access_token ? `Bearer ${session.access_token}` : '',
+    }
+  }
+
+  async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+    const url = `${API_BASE_URL}${endpoint}`
+    const headers = await this.getHeaders()
+
+    const response = await fetch(url, {
+      ...options,
+      headers: {
+        ...headers,
+        ...options.headers,
+      },
+    })
+
+    if (!response.ok) {
+      throw new Error(`API Error: ${response.status} ${response.statusText}`)
+    }
+
+    return response.json()
+  }
+}
+
+const apiClient = new ApiClient()
+
+// Document API - Now calls FastAPI backend
 export const documentApi = {
-  async list() {
-    const { data, error } = await supabase
-      .from('documents')
-      .select('*')
-      .order('upload_date', { ascending: false })
-    
-    if (error) throw error
-    return data
+  async list(): Promise<Document[]> {
+    const response = await apiClient.request<DocumentListResponse>('/api/v1/docs')
+    return response.documents
   },
 
-  async get(id: string) {
-    const { data, error } = await supabase
-      .from('documents')
-      .select('*')
-      .eq('id', id)
-      .single()
-    
-    if (error) throw error
-    return data
+  async get(id: string): Promise<Document> {
+    return apiClient.request<Document>(`/api/v1/docs/${id}`)
   },
 
-  async create(document: DocumentInsert) {
-    const { data, error } = await supabase
-      .from('documents')
-      .insert(document)
-      .select()
-      .single()
-    
-    if (error) throw error
-    return data
+  async getStatus(id: string): Promise<DocumentStatusResponse> {
+    return apiClient.request<DocumentStatusResponse>(`/api/v1/docs/status?documentId=${id}`)
   },
 
-  async delete(id: string) {
-    const { error } = await supabase
-      .from('documents')
-      .delete()
-      .eq('id', id)
-    
-    if (error) throw error
-  },
-
-  async upload(file: File) {
+  async upload(file: File): Promise<DocumentUploadResponse> {
+    // First upload to Supabase Storage
+    const { supabase } = await import('@/integrations/supabase/client')
     const user = await supabase.auth.getUser()
     if (!user.data.user) throw new Error('Not authenticated')
 
@@ -66,171 +85,100 @@ export const documentApi = {
 
     if (uploadError) throw uploadError
 
-    // Create document record
-    const documentData: DocumentInsert = {
-      user_id: user.data.user.id,
-      title: file.name.replace(/\.[^/.]+$/, ''),
-      filename: file.name,
-      file_size: file.size,
-      file_path: filePath,
-      status: 'uploaded'
+    // Then call FastAPI to start ingestion
+    const requestBody = {
+      documentId: crypto.randomUUID(),
+      storagePath: filePath,
+      mime: file.type || 'application/octet-stream'
     }
 
-    return this.create(documentData)
+    return apiClient.request<DocumentUploadResponse>('/api/v1/docs/ingest', {
+      method: 'POST',
+      body: JSON.stringify(requestBody)
+    })
+  },
+
+  async delete(id: string): Promise<void> {
+    await apiClient.request(`/api/v1/docs/${id}`, {
+      method: 'DELETE'
+    })
   }
 }
 
-// Chat API
+// Chat API - Now calls FastAPI backend
 export const chatApi = {
-  async getSessions(documentId: string) {
-    const { data, error } = await supabase
-      .from('chat_sessions')
-      .select('*')
-      .eq('document_id', documentId)
-      .order('created_at', { ascending: false })
-    
-    if (error) throw error
-    return data
+  async getSessions(documentId: string): Promise<ChatSession[]> {
+    return apiClient.request<ChatSession[]>(`/api/v1/rag/sessions?documentId=${documentId}`)
   },
 
-  async createSession(documentId: string, title?: string) {
-    const user = await supabase.auth.getUser()
-    if (!user.data.user) throw new Error('Not authenticated')
-
-    const { data, error } = await supabase
-      .from('chat_sessions')
-      .insert({
-        user_id: user.data.user.id,
-        document_id: documentId,
-        title: title || 'New Chat'
-      })
-      .select()
-      .single()
-    
-    if (error) throw error
-    return data
+  async createSession(documentId: string, title?: string): Promise<ChatSession> {
+    return apiClient.request<ChatSession>('/api/v1/rag/sessions', {
+      method: 'POST',
+      body: JSON.stringify({ documentId, title })
+    })
   },
 
-  async getMessages(sessionId: string) {
-    const { data, error } = await supabase
-      .from('chat_messages')
-      .select('*')
-      .eq('session_id', sessionId)
-      .order('timestamp', { ascending: true })
-    
-    if (error) throw error
-    return data
+  async getMessages(sessionId: string): Promise<ChatMessage[]> {
+    return apiClient.request<ChatMessage[]>(`/api/v1/rag/messages?sessionId=${sessionId}`)
   },
 
-  async sendMessage(sessionId: string, content: string, role: 'user' | 'assistant', sources?: any) {
-    const { data, error } = await supabase
-      .from('chat_messages')
-      .insert({
-        session_id: sessionId,
-        role,
-        content,
-        sources
-      })
-      .select()
-      .single()
-    
-    if (error) throw error
-    return data
+  async sendMessage(sessionId: string, content: string, role: 'user' | 'assistant', sources?: any): Promise<ChatMessage> {
+    return apiClient.request<ChatMessage>('/api/v1/rag/messages', {
+      method: 'POST',
+      body: JSON.stringify({ sessionId, content, role, sources })
+    })
   }
 }
 
-// Quiz API
+// Quiz API - Now calls FastAPI backend
 export const quizApi = {
-  async getConfigs(documentId: string) {
-    const { data, error } = await supabase
-      .from('quiz_configs')
-      .select('*')
-      .eq('document_id', documentId)
-      .order('created_at', { ascending: false })
-    
-    if (error) throw error
-    return data
+  async getConfigs(documentId: string): Promise<QuizConfig[]> {
+    return apiClient.request<QuizConfig[]>(`/api/v1/quiz/configs?documentId=${documentId}`)
   },
 
-  async createConfig(config: Omit<Database['public']['Tables']['quiz_configs']['Insert'], 'user_id'>) {
-    const user = await supabase.auth.getUser()
-    if (!user.data.user) throw new Error('Not authenticated')
-
-    const { data, error } = await supabase
-      .from('quiz_configs')
-      .insert({
-        ...config,
-        user_id: user.data.user.id
-      })
-      .select()
-      .single()
-    
-    if (error) throw error
-    return data
+  async createConfig(config: any): Promise<QuizConfig> {
+    return apiClient.request<QuizConfig>('/api/v1/quiz/configs', {
+      method: 'POST',
+      body: JSON.stringify(config)
+    })
   },
 
-  async getAttempts(userId?: string) {
-    const { data, error } = await supabase
-      .from('quiz_attempts')
-      .select(`
-        *,
-        quiz_configs (
-          title,
-          documents (title)
-        )
-      `)
-      .order('started_at', { ascending: false })
-    
-    if (error) throw error
-    return data
+  async getAttempts(): Promise<QuizAttempt[]> {
+    return apiClient.request<QuizAttempt[]>('/api/v1/quiz/attempts')
   },
 
-  async createAttempt(quizConfigId: string) {
-    const user = await supabase.auth.getUser()
-    if (!user.data.user) throw new Error('Not authenticated')
+  async createAttempt(quizConfigId: string): Promise<QuizAttempt> {
+    return apiClient.request<QuizAttempt>('/api/v1/quiz/attempts', {
+      method: 'POST',
+      body: JSON.stringify({ quizConfigId })
+    })
+  },
 
-    const { data, error } = await supabase
-      .from('quiz_attempts')
-      .insert({
-        user_id: user.data.user.id,
-        quiz_config_id: quizConfigId
-      })
-      .select()
-      .single()
-    
-    if (error) throw error
-    return data
+  async generateQuiz(documentId: string, config: any) {
+    return apiClient.request('/api/v1/quiz/generate', {
+      method: 'POST',
+      body: JSON.stringify({ documentId, config })
+    })
+  },
+
+  async submitQuiz(quizId: string, answers: any) {
+    return apiClient.request('/api/v1/quiz/submit', {
+      method: 'POST',
+      body: JSON.stringify({ quizId, answers })
+    })
   }
 }
 
-// Profile API
+// Profile API - Now calls FastAPI backend
 export const profileApi = {
-  async get() {
-    const user = await supabase.auth.getUser()
-    if (!user.data.user) throw new Error('Not authenticated')
-
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('user_id', user.data.user.id)
-      .single()
-    
-    if (error) throw error
-    return data
+  async get(): Promise<Profile> {
+    return apiClient.request<Profile>('/api/v1/profile')
   },
 
-  async update(updates: Partial<Database['public']['Tables']['profiles']['Update']>) {
-    const user = await supabase.auth.getUser()
-    if (!user.data.user) throw new Error('Not authenticated')
-
-    const { data, error } = await supabase
-      .from('profiles')
-      .update(updates)
-      .eq('user_id', user.data.user.id)
-      .select()
-      .single()
-    
-    if (error) throw error
-    return data
+  async update(updates: Partial<Profile>): Promise<Profile> {
+    return apiClient.request<Profile>('/api/v1/profile', {
+      method: 'PUT',
+      body: JSON.stringify(updates)
+    })
   }
 }

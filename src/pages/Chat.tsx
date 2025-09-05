@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Textarea } from "@/components/ui/textarea"
+import { useDocuments } from "@/hooks/useQueries"
 
 interface Message {
   id: string
@@ -23,11 +24,7 @@ interface Source {
   confidence: number
 }
 
-const mockDocuments = [
-  { id: 1, title: "Advanced Chemistry Textbook", pages: 450 },
-  { id: 2, title: "Machine Learning Fundamentals", pages: 320 },
-  { id: 3, title: "Biology Lab Manual", pages: 280 },
-]
+// Use real documents from API instead of mock data
 
 const mockMessages: Message[] = [
   {
@@ -39,9 +36,10 @@ const mockMessages: Message[] = [
 ]
 
 export default function Chat() {
+  const { data: documents = [], isLoading: documentsLoading } = useDocuments()
   const [messages, setMessages] = useState<Message[]>(mockMessages)
   const [input, setInput] = useState("")
-  const [selectedDocument, setSelectedDocument] = useState<number | null>(null)
+  const [selectedDocument, setSelectedDocument] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
@@ -124,29 +122,35 @@ Would you like me to elaborate on any of these points or explain specific aspect
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
-            {mockDocuments.map((doc) => (
-              <div
-                key={doc.id}
-                className={`p-3 rounded-lg border cursor-pointer transition-colors ${
-                  selectedDocument === doc.id
-                    ? 'border-primary bg-primary/5'
-                    : 'border-border hover:border-primary/50'
-                }`}
-                onClick={() => setSelectedDocument(doc.id)}
-              >
-                <div className="flex items-start gap-3">
-                  <div className="w-10 h-10 bg-primary/10 rounded-lg flex items-center justify-center flex-shrink-0">
-                    <FileText className="w-5 h-5 text-primary" />
-                  </div>
-                  <div className="min-w-0">
-                    <p className="font-medium text-sm leading-tight">{doc.title}</p>
-                    <p className="text-xs text-muted-foreground mt-1">
-                      {doc.pages} pages
-                    </p>
+            {documentsLoading ? (
+              <div className="text-center py-4 text-muted-foreground">Loading documents...</div>
+            ) : documents.length === 0 ? (
+              <div className="text-center py-4 text-muted-foreground">No documents found</div>
+            ) : (
+              documents.map((doc) => (
+                <div
+                  key={doc.id}
+                  className={`p-3 rounded-lg border cursor-pointer transition-colors ${
+                    selectedDocument === doc.id
+                      ? 'border-primary bg-primary/5'
+                      : 'border-border hover:border-primary/50'
+                  }`}
+                  onClick={() => setSelectedDocument(doc.id)}
+                >
+                  <div className="flex items-start gap-3">
+                    <div className="w-10 h-10 bg-primary/10 rounded-lg flex items-center justify-center flex-shrink-0">
+                      <FileText className="w-5 h-5 text-primary" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="font-medium text-sm leading-tight">{doc.title || doc.filename}</p>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        {doc.status === 'completed' ? `${doc.chunksCount || 0} chunks` : 'Processing...'}
+                      </p>
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              ))
+            )}
           </CardContent>
         </Card>
 

@@ -4,6 +4,7 @@ from .common import ErrorResponse, BaseResponse
 from .documents import DocumentBase, IngestRequest, IngestResponse, DocumentStatusResponse
 from .rag import RagQuery, RagResponse, Citation
 from .quiz import QuizConfig, QuizGenerateRequest, QuizGenerateResponse, QuizSubmitRequest, QuizSubmitResponse
+from .profile import ProfileBase, ProfileResponse, ProfileUpdateRequest
 
 __all__ = [
     # Common models
@@ -26,5 +27,10 @@ __all__ = [
     "QuizGenerateRequest",
     "QuizGenerateResponse", 
     "QuizSubmitRequest",
-    "QuizSubmitResponse"
+    "QuizSubmitResponse",
+    
+    # Profile models
+    "ProfileBase",
+    "ProfileResponse",
+    "ProfileUpdateRequest"
 ]

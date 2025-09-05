@@ -2,10 +2,12 @@
 
 import logging
 import uuid
-from typing import Optional
+from typing import Optional, List
+from datetime import datetime
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from uuid import UUID
+from pydantic import BaseModel, Field
 
 from app.models.rag import (
     RagQuery, 
@@ -15,10 +17,58 @@ from app.models.rag import (
     SearchResponse,
     SearchResult
 )
+from app.models.common import BaseResponse
 from app.api.deps import get_current_user_id, get_trace_id
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+
+# Chat session and message models
+class ChatSession(BaseModel):
+    """Chat session model"""
+    id: UUID = Field(description="Session ID")
+    user_id: UUID = Field(description="User ID", alias="userId")
+    document_id: UUID = Field(description="Document ID", alias="documentId")
+    title: str = Field(description="Session title")
+    created_at: datetime = Field(description="Creation timestamp", alias="createdAt")
+    updated_at: datetime = Field(description="Last update timestamp", alias="updatedAt")
+    
+    class Config:
+        populate_by_name = True
+
+
+class ChatMessage(BaseModel):
+    """Chat message model"""
+    id: UUID = Field(description="Message ID")
+    session_id: UUID = Field(description="Session ID", alias="sessionId")
+    role: str = Field(description="Message role (user or assistant)")
+    content: str = Field(description="Message content")
+    sources: Optional[dict] = Field(default=None, description="Sources/citations")
+    timestamp: datetime = Field(description="Message timestamp")
+    
+    class Config:
+        populate_by_name = True
+
+
+class ChatSessionCreateRequest(BaseModel):
+    """Chat session creation request"""
+    document_id: UUID = Field(description="Document ID", alias="documentId")
+    title: Optional[str] = Field(default=None, description="Session title")
+    
+    class Config:
+        populate_by_name = True
+
+
+class ChatMessageCreateRequest(BaseModel):
+    """Chat message creation request"""
+    session_id: UUID = Field(description="Session ID", alias="sessionId")
+    content: str = Field(description="Message content")
+    role: str = Field(description="Message role (user or assistant)")
+    sources: Optional[dict] = Field(default=None, description="Sources/citations")
+    
+    class Config:
+        populate_by_name = True
 
 
 @router.post("/query", response_model=RagResponse)
@@ -161,4 +211,154 @@ async def search_document(
         totalChunks=47,  # Total chunks in document
         searchType=request.search_type or "hybrid",
         trace_id=trace_id
+    )
+
+
+@router.get("/sessions", response_model=List[ChatSession])
+async def get_chat_sessions(
+    document_id: UUID = Query(description="Document ID to get sessions for", alias="documentId"),
+    user_id: UUID = Depends(get_current_user_id),
+    trace_id: Optional[str] = Depends(get_trace_id)
+):
+    """
+    Get chat sessions for a document
+    
+    Returns all chat sessions for the specified document.
+    """
+    logger.info(
+        "Chat sessions requested",
+        extra={
+            "trace_id": trace_id,
+            "document_id": str(document_id),
+            "user_id": str(user_id)
+        }
+    )
+    
+    # DUMMY: Return sample chat sessions
+    return [
+        ChatSession(
+            id=UUID("880e8400-e29b-41d4-a716-446655440000"),
+            userId=user_id,
+            documentId=document_id,
+            title="Research Questions",
+            createdAt=datetime.utcnow(),
+            updatedAt=datetime.utcnow()
+        ),
+        ChatSession(
+            id=UUID("880e8400-e29b-41d4-a716-446655440001"),
+            userId=user_id,
+            documentId=document_id,
+            title="Study Session",
+            createdAt=datetime.utcnow(),
+            updatedAt=datetime.utcnow()
+        )
+    ]
+
+
+@router.post("/sessions", response_model=ChatSession)
+async def create_chat_session(
+    request: ChatSessionCreateRequest,
+    user_id: UUID = Depends(get_current_user_id),
+    trace_id: Optional[str] = Depends(get_trace_id)
+):
+    """
+    Create a new chat session
+    
+    Creates a new chat session for the specified document.
+    """
+    logger.info(
+        "Chat session creation requested",
+        extra={
+            "trace_id": trace_id,
+            "document_id": str(request.document_id),
+            "user_id": str(user_id),
+            "title": request.title
+        }
+    )
+    
+    # DUMMY: Return new chat session
+    session_id = UUID(f"{uuid.uuid4()}")
+    return ChatSession(
+        id=session_id,
+        userId=user_id,
+        documentId=request.document_id,
+        title=request.title or f"Chat Session {session_id.hex[:8]}",
+        createdAt=datetime.utcnow(),
+        updatedAt=datetime.utcnow()
+    )
+
+
+@router.get("/messages", response_model=List[ChatMessage])
+async def get_chat_messages(
+    session_id: UUID = Query(description="Session ID to get messages for", alias="sessionId"),
+    user_id: UUID = Depends(get_current_user_id),
+    trace_id: Optional[str] = Depends(get_trace_id)
+):
+    """
+    Get messages for a chat session
+    
+    Returns all messages in the specified chat session.
+    """
+    logger.info(
+        "Chat messages requested",
+        extra={
+            "trace_id": trace_id,
+            "session_id": str(session_id),
+            "user_id": str(user_id)
+        }
+    )
+    
+    # DUMMY: Return sample chat messages
+    return [
+        ChatMessage(
+            id=UUID("990e8400-e29b-41d4-a716-446655440000"),
+            sessionId=session_id,
+            role="user",
+            content="What are the main findings of this research?",
+            sources=None,
+            timestamp=datetime.utcnow()
+        ),
+        ChatMessage(
+            id=UUID("990e8400-e29b-41d4-a716-446655440001"),
+            sessionId=session_id,
+            role="assistant",
+            content="Based on the document, the main findings include...",
+            sources={
+                "chunks": ["chunk1", "chunk2"],
+                "pages": [5, 12]
+            },
+            timestamp=datetime.utcnow()
+        )
+    ]
+
+
+@router.post("/messages", response_model=ChatMessage)
+async def create_chat_message(
+    request: ChatMessageCreateRequest,
+    user_id: UUID = Depends(get_current_user_id),
+    trace_id: Optional[str] = Depends(get_trace_id)
+):
+    """
+    Create a new chat message
+    
+    Adds a new message to the specified chat session.
+    """
+    logger.info(
+        "Chat message creation requested",
+        extra={
+            "trace_id": trace_id,
+            "session_id": str(request.session_id),
+            "user_id": str(user_id),
+            "role": request.role
+        }
+    )
+    
+    # DUMMY: Return new chat message
+    return ChatMessage(
+        id=UUID(f"{uuid.uuid4()}"),
+        sessionId=request.session_id,
+        role=request.role,
+        content=request.content,
+        sources=request.sources,
+        timestamp=datetime.utcnow()
     )

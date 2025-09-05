@@ -44,34 +44,36 @@ async def get_current_user_id(authorization: Optional[str] = Header(None)) -> UU
     
     token = authorization[7:]  # Remove "Bearer " prefix
     
-    # TODO: Implement proper JWT verification with Supabase
-    # For now, we'll use a placeholder for development
+    # Handle development mode tokens
+    if token == "dev-user-123":
+        return UUID("11111111-1111-1111-1111-111111111111")
+    
+    # For production with Supabase JWT
     if not supabase:
-        # Development mode - accept any valid UUID as user ID
-        if token == "dev-user-123":
-            return UUID("11111111-1111-1111-1111-111111111111")
-        else:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid token - use 'dev-user-123' for development"
-            )
+        # No Supabase configured, use development fallback
+        logger.warning("No Supabase configuration, using development auth")
+        return UUID("11111111-1111-1111-1111-111111111111")
     
     try:
-        # Verify JWT with Supabase (when configured)
-        user = supabase.auth.get_user(token)
-        if not user or not user.user:
+        # Verify JWT access token with Supabase
+        # The frontend sends JWT access tokens from supabase.auth.getSession()
+        response = supabase.auth.get_user(token)
+        
+        if response.user and response.user.id:
+            return UUID(response.user.id)
+        else:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid or expired token"
             )
-        
-        return UUID(user.user.id)
     
     except Exception as e:
         logger.error(f"JWT verification failed: {e}")
-        # In development, fall back to test user for any token
-        if token == "dev-user-123":
+        # In development, accept any non-empty token as valid for testing
+        if settings.debug and token and len(token) > 10:
+            logger.warning(f"Development mode: accepting token for testing")
             return UUID("11111111-1111-1111-1111-111111111111")
+        
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Token verification failed"

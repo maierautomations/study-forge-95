@@ -81,7 +81,7 @@ export const useSendMessage = () => {
       sources?: any
     }) => chatApi.sendMessage(sessionId, content, role, sources),
     onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ['chat-messages', data.session_id] })
+      queryClient.invalidateQueries({ queryKey: ['chat-messages', data.sessionId] })
     }
   })
 }

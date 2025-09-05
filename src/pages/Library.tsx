@@ -52,19 +52,19 @@ export default function Library() {
   })
 
   const filteredDocuments = documents.filter(doc =>
-    doc.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    (doc.title || doc.filename).toLowerCase().includes(searchQuery.toLowerCase()) ||
     doc.filename.toLowerCase().includes(searchQuery.toLowerCase())
   )
 
   const sortedDocuments = [...filteredDocuments].sort((a, b) => {
     switch (sortBy) {
       case "name":
-        return a.title.localeCompare(b.title)
+        return (a.title || a.filename).localeCompare(b.title || b.filename)
       case "size":
-        return b.file_size - a.file_size
+        return b.fileSizeBytes! - a.fileSizeBytes!
       case "recent":
       default:
-        return new Date(b.upload_date).getTime() - new Date(a.upload_date).getTime()
+        return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
     }
   })
 
@@ -180,7 +180,7 @@ export default function Library() {
               <Upload className="w-8 h-8 text-accent" />
                 <div>
                   <p className="text-2xl font-bold">
-                    {formatFileSize(documents.reduce((acc, doc) => acc + doc.file_size, 0))}
+                    {formatFileSize(documents.reduce((acc, doc) => acc + (doc.fileSizeBytes || 0), 0))}
                   </p>
                   <p className="text-sm text-muted-foreground">Total Size</p>
                 </div>
@@ -242,9 +242,9 @@ export default function Library() {
                     <FileText className="w-6 h-6 text-primary" />
                   </div>
                   <div className="min-w-0 flex-1">
-                    <CardTitle className="text-lg truncate">{doc.title}</CardTitle>
+                    <CardTitle className="text-lg truncate">{doc.title || doc.filename}</CardTitle>
                     <CardDescription className="mt-1">
-                      {formatFileSize(doc.file_size)} • {new Date(doc.upload_date).toLocaleDateString()}
+                      {formatFileSize(doc.fileSizeBytes || 0)} • {new Date(doc.updatedAt).toLocaleDateString()}
                     </CardDescription>
                   </div>
                   {viewMode === "grid" && (
