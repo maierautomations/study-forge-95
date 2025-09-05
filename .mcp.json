@@ -18,11 +18,7 @@
     },
     "shadcn-ui": {
       "command": "npx",
-      "args": [
-        "@jpisnice/shadcn-ui-mcp-server",
-        "--github-api-key",
-        "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"
-      ]
+      "args": ["@jpisnice/shadcn-ui-mcp-server", "--github-api-key", ""]
     }
   }
 }
