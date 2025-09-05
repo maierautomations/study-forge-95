@@ -1,7 +1,7 @@
 """Database module for StudyRAG API"""
 
-from .session import init_db_pool, close_db_pool, get_db_pool
-from .validation import validate_schema
+from .session import init_database, cleanup_database, get_db_pool
+from .validation import validate_schema_complete
 from .operations import (
     insert_chunks,
     insert_embeddings,
@@ -14,10 +14,10 @@ from .operations import (
 )
 
 __all__ = [
-    "init_db_pool",
-    "close_db_pool", 
+    "init_database",
+    "cleanup_database", 
     "get_db_pool",
-    "validate_schema",
+    "validate_schema_complete",
     "insert_chunks",
     "insert_embeddings", 
     "update_document_status",
