@@ -6,6 +6,7 @@ from typing import Optional, List
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, Query
+from fastapi.responses import StreamingResponse
 from uuid import UUID
 from pydantic import BaseModel, Field
 
@@ -19,6 +20,7 @@ from app.models.rag import (
 )
 from app.models.common import BaseResponse
 from app.api.deps import get_current_user_id, get_trace_id
+from app.services.rag import RAGService, RAGConfig
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -82,7 +84,7 @@ async def rag_query(
     
     Process:
     1. Generate embedding for user question
-    2. Perform hybrid search (BM25 + vector similarity)
+    2. Perform hybrid search (BM25 + vector similarity)  
     3. Retrieve top relevant chunks as context
     4. Generate answer using LLM with retrieved context
     5. Return answer with source citations
@@ -96,56 +98,152 @@ async def rag_query(
             "document_id": str(request.document_id),
             "user_id": str(user_id),
             "question_length": len(request.question),
-            "max_chunks": request.max_chunks
+            "max_chunks": getattr(request, 'max_chunks', 10)
         }
     )
     
-    # DUMMY: Return hardcoded response with realistic citations
-    dummy_citations = [
-        Citation(
-            chunkId=UUID("660e8400-e29b-41d4-a716-446655440000"),
-            page=5,
-            section="3.2 Results",
-            textSnippet="The experimental results demonstrate significant improvements in accuracy when using the proposed methodology. Performance metrics showed a 15% increase compared to baseline approaches...",
-            relevanceScore=0.92
-        ),
-        Citation(
-            chunkId=UUID("660e8400-e29b-41d4-a716-446655440001"),
-            page=12,
-            section="4.1 Discussion",
-            textSnippet="These findings align with previous research in the field, suggesting that our approach addresses key limitations identified in earlier studies. The methodology proves robust across different datasets...",
-            relevanceScore=0.87
-        ),
-        Citation(
-            chunkId=UUID("660e8400-e29b-41d4-a716-446655440002"),
-            page=8,
-            section="3.3 Analysis",
-            textSnippet="Statistical analysis reveals that the observed improvements are statistically significant (p < 0.05). The effect size indicates practical significance for real-world applications...",
-            relevanceScore=0.84
+    try:
+        # Configure RAG service based on request parameters
+        config_override = {
+            "max_chunks": getattr(request, 'max_chunks', 10),
+            "temperature": getattr(request, 'temperature', 0.7),
+            "max_tokens": getattr(request, 'max_tokens', 1000)
+        }
+        
+        # Initialize RAG service
+        rag_service = RAGService()
+        
+        # Process the query
+        rag_response = await rag_service.query(
+            question=request.question,
+            document_id=str(request.document_id),
+            user_id=str(user_id),
+            config_override=config_override
         )
-    ]
+        
+        # Convert RAG service response to API response format
+        api_citations = []
+        for citation_dict in rag_response.citations:
+            api_citation = Citation(
+                chunkId=UUID(citation_dict["chunkId"]),
+                page=citation_dict.get("page"),
+                section=citation_dict.get("section"),
+                textSnippet=citation_dict["textSnippet"],
+                relevanceScore=citation_dict["relevanceScore"]
+            )
+            api_citations.append(api_citation)
+        
+        # Return API response
+        return RagResponse(
+            answer=rag_response.answer,
+            citations=api_citations,
+            question=request.question,
+            document_id=request.document_id,
+            processing_time_ms=rag_response.processing_time * 1000,  # Convert to milliseconds
+            model_used=rag_response.llm_stats.get("model", "gpt-3.5-turbo"),
+            trace_id=trace_id
+        )
+        
+    except Exception as e:
+        logger.error(
+            "RAG query failed",
+            extra={
+                "trace_id": trace_id,
+                "document_id": str(request.document_id),
+                "user_id": str(user_id),
+                "error": str(e)
+            },
+            exc_info=True
+        )
+        
+        # Return error response with helpful message
+        return RagResponse(
+            answer=f"I encountered an error while processing your question: {str(e)}. Please try again or rephrase your question.",
+            citations=[],
+            question=request.question,
+            document_id=request.document_id,
+            processing_time_ms=0,
+            model_used="error",
+            trace_id=trace_id
+        )
+
+
+@router.post("/query/stream")
+async def rag_query_stream(
+    request: RagQuery,
+    user_id: UUID = Depends(get_current_user_id),
+    trace_id: Optional[str] = Depends(get_trace_id)
+):
+    """
+    Query document using RAG with streaming response
     
-    # Generate contextual answer based on question
-    answer = f"""Based on the document content, I can provide the following insights regarding your question about "{request.question}":
-
-The research presents significant findings that demonstrate improved methodological approaches with measurable performance gains. The experimental results show a 15% increase in accuracy compared to baseline methods, with statistical significance confirmed through rigorous analysis (p < 0.05).
-
-Key points from the document:
-- The proposed methodology addresses limitations in earlier studies
-- Results are consistent across different datasets, indicating robustness
-- Both statistical and practical significance are demonstrated
-- Findings align with and extend previous research in this domain
-
-The evidence presented supports the effectiveness of the approach through comprehensive experimental validation and statistical analysis."""
-
-    return RagResponse(
-        answer=answer,
-        citations=dummy_citations[:min(len(dummy_citations), 5)],  # Top 5 citations
-        question=request.question,
-        document_id=request.document_id,
-        processing_time_ms=1247.5,
-        model_used="gpt-4o-mini",
-        trace_id=trace_id
+    Returns a streaming response with:
+    1. Status updates during processing
+    2. Citations when found
+    3. Answer chunks as they're generated
+    4. Completion status
+    
+    Response format: Server-Sent Events (text/plain)
+    """
+    logger.info(
+        "Streaming RAG query started",
+        extra={
+            "trace_id": trace_id,
+            "document_id": str(request.document_id),
+            "user_id": str(user_id),
+            "question_length": len(request.question)
+        }
+    )
+    
+    async def generate_stream():
+        try:
+            # Configure RAG service for streaming
+            config_override = {
+                "max_chunks": getattr(request, 'max_chunks', 10),
+                "temperature": getattr(request, 'temperature', 0.7),
+                "max_tokens": getattr(request, 'max_tokens', 1000),
+                "streaming": True
+            }
+            
+            # Initialize RAG service
+            rag_service = RAGService()
+            
+            # Stream the query processing
+            async for chunk in rag_service.query_streaming(
+                question=request.question,
+                document_id=str(request.document_id),
+                user_id=str(user_id),
+                config_override=config_override
+            ):
+                # Format as Server-Sent Event
+                chunk_data = f"data: {chunk}\n\n"
+                yield chunk_data
+                
+        except Exception as e:
+            logger.error(
+                "Streaming RAG query failed",
+                extra={
+                    "trace_id": trace_id,
+                    "error": str(e)
+                },
+                exc_info=True
+            )
+            
+            error_chunk = {
+                "type": "error",
+                "message": f"Stream error: {str(e)}",
+                "trace_id": trace_id
+            }
+            yield f"data: {error_chunk}\n\n"
+    
+    return StreamingResponse(
+        generate_stream(),
+        media_type="text/plain",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Trace-ID": trace_id or ""
+        }
     )
 
 

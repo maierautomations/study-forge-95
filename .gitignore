@@ -23,5 +23,13 @@ dist-ssr
 *.sln
 *.sw?
 
+# Environment variables (contains sensitive API keys)
+.env
+.env.local
+.env.production
+.env.*.local
+*.env
+apps/api/.env
+
 # MCP Configuration (contains sensitive tokens)
 .mcp.json

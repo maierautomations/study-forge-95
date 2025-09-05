@@ -85,14 +85,16 @@ ALLOWED_ORIGINS=http://localhost:3000,https://
 - **API Integration**: Real logic statt dummy responses
 - **Testing**: Comprehensive test suite, setup documentation
 
-### 🎯 P4 — Hybrid Retrieval (NÄCHSTER SCHRITT)
-- **BM25 Retrieval**: PostgreSQL tsvector für full-text search
-- **Vector Retrieval**: pgvector cosine similarity  
-- **Hybrid Merge**: Weighted ranking (BM25 40% + Vector 60%)
-- **Citation Extraction**: Source references mit chunk_id, page, section
-- **RAG Service**: Query → Retrieval → LLM → Answer mit Citations
+### ✅ P4 — Hybrid Retrieval (FERTIG - 100% getestet)
+- **BM25 Retrieval**: PostgreSQL tsvector für full-text search ✅
+- **Vector Retrieval**: pgvector cosine similarity ✅  
+- **Hybrid Merge**: Weighted ranking (BM25 40% + Vector 60%) ✅
+- **Citation Extraction**: Source references mit chunk_id, page, section ✅
+- **RAG Service**: Query → Retrieval → LLM → Answer mit Citations ✅
+- **API Integration**: Echte /rag/query + /rag/query/stream endpoints ✅
+- **Test Results**: 11/11 tests passing (100% success rate) ✅
 
-### 🎯 P5 — Quiz Engine MVP (DANACH)
+### 🎯 P5 — Quiz Engine MVP (NÄCHSTER SCHRITT)
 - **Question Generation**: MC/True-False/Short Answer aus chunks
 - **Difficulty Levels**: Beginner/Intermediate/Advanced
 - **Attempt Tracking**: Scoring, explanations mit source references
@@ -168,20 +170,19 @@ limit 10;
 
 ## 9) Definition of Done (DoD)
 
-### ✅ P0-P3 (FERTIG):
-- API-Endpoints + Pydantic-Schemas implementiert
-- FastAPI Backend vollständig funktionsfähig
-- Document Ingestion Pipeline produktionsreif
-- Background processing mit job management
-- Comprehensive testing & documentation
+### ✅ P0-P4 (FERTIG):
+- API-Endpoints + Pydantic-Schemas implementiert ✅
+- FastAPI Backend vollständig funktionsfähig ✅
+- Document Ingestion Pipeline produktionsreif ✅
+- Background processing mit job management ✅
+- BM25 + Vector Search implementiert ✅
+- Hybrid ranking algorithm (40/60 weight) ✅
+- Citation extraction mit source references ✅
+- RAG Service mit OpenAI integration ✅
+- Streaming RAG endpoints (/rag/query/stream) ✅
+- Comprehensive testing (11/11 tests, 100% success) ✅
 
-### 🎯 P4 (Hybrid Retrieval):
-- BM25 + Vector Search implementiert
-- Hybrid ranking algorithm (40/60 weight)
-- Citation extraction mit source references
-- RAG Service mit OpenAI integration
-
-### 🎯 P5 (Quiz Engine):
+### 🎯 P5 (Quiz Engine - NÄCHSTER SCHRITT):
 - Question generation aus document chunks
 - Multiple question types (MC/TF/Short)
 - Attempt tracking mit scoring
@@ -234,8 +235,11 @@ cd apps/api && poetry run uvicorn app.main:app --host 0.0.0.0 --port 8002 --relo
 # Frontend starten  
 npm run dev
 
-# Ingestion Pipeline testen
+# Ingestion Pipeline testen (P3)
 cd apps/api && poetry run python test_ingestion.py
+
+# Hybrid Retrieval testen (P4)  
+cd apps/api && poetry run python test_retrieval.py
 
 # OpenAPI Schema exportieren
 cd apps/api && poetry run python export_openapi.py
@@ -273,21 +277,23 @@ cd apps/api && poetry run python test_ingestion.py
 python -c "from app.services.chunking import create_chunks; print('✓ Chunking works')"
 ```
 
-### Next Steps (P4 - Hybrid Retrieval)
-1. **BM25 Service**: PostgreSQL tsvector queries  
-2. **Vector Service**: pgvector cosine similarity
-3. **Hybrid Ranker**: Merge results (40% BM25 + 60% Vector)
-4. **RAG Service**: Query → Retrieve → OpenAI → Response mit citations
-5. **Update**: `/rag/query` endpoint mit real logic
+### Next Steps (P5 - Quiz Engine)
+1. **Question Generation**: Generate MC/TF/Short answer questions from chunks
+2. **Difficulty Assessment**: Automatically determine question difficulty levels  
+3. **Question Types**: Implement multiple choice, true/false, short answer
+4. **Attempt Tracking**: Score tracking, performance analytics
+5. **Source-based Explanations**: Link explanations back to document sources
 
 ### Development Notes
-- ✅ P0-P3 komplett implementiert und getestet
-- 🎯 P4 (Retrieval) ist der nächste logische Schritt
+- ✅ P0-P4 komplett implementiert und getestet (100% success rate)
+- 🎯 P5 (Quiz Engine) ist der nächste logische Schritt
 - API läuft auf :8002, Frontend auf :3000  
+- Hybrid Retrieval vollständig funktionsfähig
 - Alle dependencies bereits installiert
 - Database schema in Supabase bereit
+- OpenAI integration working (embeddings + LLM)
 - Background processing funktioniert
-- Comprehensive documentation in docs/
+- Comprehensive documentation und test suites
 
 ## 12) Nützliche Links
 - **Setup Guide**: `apps/api/INGESTION_SETUP.md`
